@@ -1,5 +1,5 @@
 use ethers::{
-    types::{transaction::eip2718::TypedTransaction, NameOrAddress, U256},
+    types::{transaction::eip2718::TypedTransaction, NameOrAddress},
     utils::{
         rlp::{Decodable, Rlp},
         to_checksum,
@@ -22,6 +22,8 @@ mod signer_contract;
 mod xchain_address;
 use xchain_address::XChainAddress;
 
+type XChainTokenAmount = ethers::types::U256;
+
 /// A successful request will emit two events, one for the request and one for
 /// the finalized transaction, in that order. The `id` field will be the same
 /// for both events.
@@ -33,14 +35,14 @@ pub enum ContractEvent {
     Request {
         xchain_id: String,
         sender: Option<String>,
-        payload: String,
-        request_tokens_for_gas: Option<U256>,
+        unsigned_transaction: String,
+        request_tokens_for_gas: Option<XChainTokenAmount>,
     },
     Finalize {
         xchain_id: String,
         sender: Option<String>,
-        signed_payload: String,
-        request_tokens_for_gas: Option<U256>,
+        signed_transaction: String,
+        request_tokens_for_gas: Option<XChainTokenAmount>,
     },
 }
 
@@ -223,7 +225,7 @@ impl Contract {
         ContractEvent::Request {
             xchain_id: self.xchain_id.clone(),
             sender: sender_address(&transaction),
-            payload: hex::encode(&transaction.rlp()),
+            unsigned_transaction: hex::encode(&transaction.rlp()),
             request_tokens_for_gas: tokens_for_gas(&transaction),
         }
         .emit();
@@ -252,7 +254,7 @@ impl Contract {
         ContractEvent::Finalize {
             xchain_id: self.xchain_id.clone(),
             sender: sender_address(&transaction),
-            signed_payload: rlp_signed_hex,
+            signed_transaction: rlp_signed_hex,
             request_tokens_for_gas,
         }
         .emit();
@@ -265,7 +267,7 @@ fn sender_address(tx: &TypedTransaction) -> Option<String> {
     tx.from().map(|from| to_checksum(from, None))
 }
 
-fn tokens_for_gas(tx: &TypedTransaction) -> Option<U256> {
+fn tokens_for_gas(tx: &TypedTransaction) -> Option<XChainTokenAmount> {
     tx.gas()
         .zip(tx.gas_price())
         .map(|(gas, gas_price)| gas * gas_price)
