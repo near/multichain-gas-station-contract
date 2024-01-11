@@ -7,7 +7,6 @@ use ethers::{
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    collections::LazyOption,
     env,
     json_types::U64,
     near_bindgen, require,
@@ -45,7 +44,7 @@ pub enum ContractEvent {
     },
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(crate = "near_sdk::serde")]
 pub struct Flags {
     is_deployment_allowed: bool,
@@ -57,7 +56,6 @@ pub struct Flags {
 pub enum StorageKey {
     SenderWhitelist,
     ReceiverWhitelist,
-    Flags,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Owner)]
@@ -68,7 +66,7 @@ pub struct Contract {
     pub signer_contract_id: AccountId,
     pub sender_whitelist: UnorderedSet<XChainAddress>,
     pub receiver_whitelist: UnorderedSet<XChainAddress>,
-    pub flags: LazyOption<Flags>,
+    pub flags: Flags,
 }
 
 #[near_bindgen]
@@ -81,7 +79,7 @@ impl Contract {
             signer_contract_id,
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
-            flags: LazyOption::new(StorageKey::Flags, None),
+            flags: Flags::default(),
         };
 
         Owner::init(&mut contract, &env::predecessor_account_id());
@@ -89,13 +87,13 @@ impl Contract {
         contract
     }
 
-    pub fn get_flags(&self) -> Option<Flags> {
-        self.flags.get()
+    pub fn get_flags(&self) -> &Flags {
+        &self.flags
     }
 
     pub fn set_flags(&mut self, flags: Flags) {
         self.assert_owner();
-        self.flags.set(&flags);
+        self.flags = flags;
     }
 
     pub fn get_receiver_whitelist(&self) -> Vec<String> {
@@ -192,35 +190,34 @@ impl Contract {
             None => None,
         };
 
-        let flags = self.flags.get();
-
-        if let Some(flags) = flags {
-            // Validate receiver
-            if let Some(ref receiver) = receiver {
-                // Check receiver whitelist
-                if flags.is_receiver_whitelist_enabled {
-                    require!(
-                        self.receiver_whitelist.contains(receiver),
-                        "Receiver is not whitelisted",
-                    );
-                }
-            } else {
-                // No receiver == contract deployment
-                require!(flags.is_deployment_allowed, "Deployment is not allowed");
-            }
-
-            // Check sender whitelist
-            if flags.is_sender_whitelist_enabled {
+        // Validate receiver
+        if let Some(ref receiver) = receiver {
+            // Check receiver whitelist
+            if self.flags.is_receiver_whitelist_enabled {
                 require!(
-                    self.sender_whitelist.contains(
-                        &transaction
-                            .from()
-                            .unwrap_or_else(|| env::panic_str("Sender whitelist is enabled"))
-                            .into()
-                    ),
-                    "Sender is not whitelisted",
+                    self.receiver_whitelist.contains(receiver),
+                    "Receiver is not whitelisted",
                 );
             }
+        } else {
+            // No receiver == contract deployment
+            require!(
+                self.flags.is_deployment_allowed,
+                "Deployment is not allowed"
+            );
+        }
+
+        // Check sender whitelist
+        if self.flags.is_sender_whitelist_enabled {
+            require!(
+                self.sender_whitelist.contains(
+                    &transaction
+                        .from()
+                        .unwrap_or_else(|| env::panic_str("Sender whitelist is enabled"))
+                        .into()
+                ),
+                "Sender is not whitelisted",
+            );
         }
 
         ContractEvent::Request {
