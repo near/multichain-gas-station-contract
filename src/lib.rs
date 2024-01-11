@@ -6,7 +6,7 @@ use ethers::{
     },
 };
 use near_sdk::{
-    borsh::{BorshDeserialize, BorshSerialize},
+    borsh::{self, BorshDeserialize, BorshSerialize},
     collections::LazyOption,
     env,
     json_types::U64,
@@ -15,7 +15,7 @@ use near_sdk::{
     store::UnorderedSet,
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError,
 };
-use near_sdk_contract_tools::{event, standard::nep297::Event};
+use near_sdk_contract_tools::{event, owner::*, standard::nep297::Event, Owner};
 
 use crate::signer_contract::ext_signer;
 
@@ -46,29 +46,28 @@ pub enum ContractEvent {
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone, Debug)]
-#[borsh(crate = "near_sdk::borsh")]
 #[serde(crate = "near_sdk::serde")]
 pub struct Flags {
-    allow_deployment: bool,
+    is_deployment_allowed: bool,
+    is_sender_whitelist_enabled: bool,
+    is_receiver_whitelist_enabled: bool,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, BorshStorageKey, Hash, Clone, Debug, PartialEq, Eq)]
-#[borsh(crate = "near_sdk::borsh")]
 pub enum StorageKey {
     SenderWhitelist,
     ReceiverWhitelist,
     Flags,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug)]
-#[borsh(crate = "near_sdk::borsh")]
+#[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Owner)]
 #[near_bindgen]
 pub struct Contract {
     pub xchain_id: String,
     pub chain_id: U64,
     pub signer_contract_id: AccountId,
-    pub sender_whitelist: Option<UnorderedSet<XChainAddress>>,
-    pub receiver_whitelist: Option<UnorderedSet<XChainAddress>>,
+    pub sender_whitelist: UnorderedSet<XChainAddress>,
+    pub receiver_whitelist: UnorderedSet<XChainAddress>,
     pub flags: LazyOption<Flags>,
 }
 
@@ -76,14 +75,73 @@ pub struct Contract {
 impl Contract {
     #[init]
     pub fn new(xchain_id: String, chain_id: U64, signer_contract_id: AccountId) -> Self {
-        Self {
+        let mut contract = Self {
             xchain_id,
             chain_id,
             signer_contract_id,
-            sender_whitelist: None,
-            receiver_whitelist: None,
+            sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
+            receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
             flags: LazyOption::new(StorageKey::Flags, None),
+        };
+
+        Owner::init(&mut contract, &env::predecessor_account_id());
+
+        contract
+    }
+
+    pub fn get_flags(&self) -> Option<Flags> {
+        self.flags.get()
+    }
+
+    pub fn set_flags(&mut self, flags: Flags) {
+        self.assert_owner();
+        self.flags.set(&flags);
+    }
+
+    pub fn get_receiver_whitelist(&self) -> Vec<String> {
+        self.receiver_whitelist.iter().map(hex::encode).collect()
+    }
+
+    pub fn add_to_receiver_whitelist(&mut self, addresses: Vec<String>) {
+        self.assert_owner();
+        for address in addresses {
+            self.receiver_whitelist.insert(address_from_hex(address));
         }
+    }
+
+    pub fn remove_from_receiver_whitelist(&mut self, addresses: Vec<String>) {
+        self.assert_owner();
+        for address in addresses {
+            self.receiver_whitelist.remove(&address_from_hex(address));
+        }
+    }
+
+    pub fn clear_receiver_whitelist(&mut self) {
+        self.assert_owner();
+        self.receiver_whitelist.clear();
+    }
+
+    pub fn get_sender_whitelist(&self) -> Vec<String> {
+        self.sender_whitelist.iter().map(hex::encode).collect()
+    }
+
+    pub fn add_to_sender_whitelist(&mut self, addresses: Vec<String>) {
+        self.assert_owner();
+        for address in addresses {
+            self.sender_whitelist.insert(address_from_hex(address));
+        }
+    }
+
+    pub fn remove_from_sender_whitelist(&mut self, addresses: Vec<String>) {
+        self.assert_owner();
+        for address in addresses {
+            self.sender_whitelist.remove(&address_from_hex(address));
+        }
+    }
+
+    pub fn clear_sender_whitelist(&mut self) {
+        self.assert_owner();
+        self.sender_whitelist.clear();
     }
 
     pub fn xchain_relay(
@@ -136,33 +194,33 @@ impl Contract {
 
         let flags = self.flags.get();
 
-        match receiver {
-            Some(ref receiver) => {
-                if let Some(ref receiver_whitelist) = self.receiver_whitelist {
+        if let Some(flags) = flags {
+            // Validate receiver
+            if let Some(ref receiver) = receiver {
+                // Check receiver whitelist
+                if flags.is_receiver_whitelist_enabled {
                     require!(
-                        receiver_whitelist.contains(receiver),
+                        self.receiver_whitelist.contains(receiver),
                         "Receiver is not whitelisted",
                     );
                 }
+            } else {
+                // No receiver == contract deployment
+                require!(flags.is_deployment_allowed, "Deployment is not allowed");
             }
-            None => {
-                if let Some(ref flags) = flags {
-                    require!(flags.allow_deployment, "Deployment is not allowed");
-                }
-            }
-        }
 
-        // Check sender whitelist
-        if let Some(ref sender_whitelist) = self.sender_whitelist {
-            require!(
-                sender_whitelist.contains(
-                    &transaction
-                        .from()
-                        .unwrap_or_else(|| env::panic_str("Sender whitelist is enabled"))
-                        .into()
-                ),
-                "Sender is not whitelisted",
-            );
+            // Check sender whitelist
+            if flags.is_sender_whitelist_enabled {
+                require!(
+                    self.sender_whitelist.contains(
+                        &transaction
+                            .from()
+                            .unwrap_or_else(|| env::panic_str("Sender whitelist is enabled"))
+                            .into()
+                    ),
+                    "Sender is not whitelisted",
+                );
+            }
         }
 
         ContractEvent::Request {
@@ -214,4 +272,14 @@ fn tokens_for_gas(tx: &TypedTransaction) -> Option<U256> {
     tx.gas()
         .zip(tx.gas_price())
         .map(|(gas, gas_price)| gas * gas_price)
+}
+
+/// Rejects transaction on decoding error
+fn address_from_hex(address: impl AsRef<[u8]>) -> XChainAddress {
+    XChainAddress(
+        hex::decode(address)
+            .unwrap_or_else(|_| env::panic_str("Error decoding address as hex"))
+            .try_into()
+            .unwrap_or_else(|_| env::panic_str("Address must be 20 bytes")),
+    )
 }
