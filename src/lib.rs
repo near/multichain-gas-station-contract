@@ -1,12 +1,15 @@
 use ethers::{
     types::{transaction::eip2718::TypedTransaction, NameOrAddress, U256},
-    utils::to_checksum,
+    utils::{
+        rlp::{Decodable, Rlp},
+        to_checksum,
+    },
 };
 use near_sdk::{
     borsh::{BorshDeserialize, BorshSerialize},
     collections::LazyOption,
     env,
-    json_types::{Base64VecU8, U64},
+    json_types::U64,
     near_bindgen, require,
     serde::{Deserialize, Serialize},
     store::UnorderedSet,
@@ -20,13 +23,24 @@ mod signer_contract;
 mod xchain_address;
 use xchain_address::XChainAddress;
 
+/// A successful request will emit two events, one for the request and one for
+/// the finalized transaction, in that order. The `id` field will be the same
+/// for both events.
+///
+/// IDs are arbitrarily chosen by the contract. An ID is guaranteed to be unique
+/// within the contract.
 #[event(version = "0.1.0", standard = "x-multichain-sig")]
 pub enum ContractEvent {
-    Relay {
+    Request {
         xchain_id: String,
         sender: Option<String>,
-        payload_id: Option<String>,
         payload: String,
+        request_tokens_for_gas: Option<U256>,
+    },
+    Finalize {
+        xchain_id: String,
+        sender: Option<String>,
+        signed_payload: String,
         request_tokens_for_gas: Option<U256>,
     },
 }
@@ -74,12 +88,31 @@ impl Contract {
 
     pub fn xchain_relay(
         &mut self,
-        #[allow(unused_mut)] mut transaction: TypedTransaction,
+        transaction_json: Option<TypedTransaction>,
+        transaction_rlp: Option<String>,
     ) -> Promise {
         // Steps:
         // 1. Filter & validate payload.
         // 2. Request signature from MPC contract.
         // 3. Emit signature as event.
+
+        let mut transaction = transaction_json
+            .or_else(|| {
+                transaction_rlp.map(|rlp_hex| {
+                    let rlp_bytes = hex::decode(rlp_hex).unwrap_or_else(|_| {
+                        env::panic_str("Error decoding `transaction_rlp` as hex")
+                    });
+                    let rlp = Rlp::new(&rlp_bytes);
+                    TypedTransaction::decode(&rlp).unwrap_or_else(|_| {
+                        env::panic_str("Error decoding `transaction_rlp` as transaction RLP")
+                    })
+                })
+            })
+            .unwrap_or_else(|| {
+                env::panic_str(
+                    "A transaction must be provided in `transaction_json` or `transaction_rlp`",
+                )
+            });
 
         require!(
             transaction.gas().is_some(),
@@ -92,6 +125,7 @@ impl Contract {
 
         transaction.set_chain_id(self.chain_id.0);
 
+        // Validate receiver
         let receiver: Option<XChainAddress> = match transaction.to() {
             Some(NameOrAddress::Name(_)) => {
                 env::panic_str("ENS names are not supported");
@@ -99,18 +133,6 @@ impl Contract {
             Some(NameOrAddress::Address(address)) => Some(address.into()),
             None => None,
         };
-
-        if let Some(ref sender_whitelist) = self.sender_whitelist {
-            require!(
-                sender_whitelist.contains(
-                    &transaction
-                        .from()
-                        .unwrap_or_else(|| env::panic_str("Sender whitelist is enabled"))
-                        .into()
-                ),
-                "Sender is not whitelisted",
-            );
-        }
 
         let flags = self.flags.get();
 
@@ -130,6 +152,27 @@ impl Contract {
             }
         }
 
+        // Check sender whitelist
+        if let Some(ref sender_whitelist) = self.sender_whitelist {
+            require!(
+                sender_whitelist.contains(
+                    &transaction
+                        .from()
+                        .unwrap_or_else(|| env::panic_str("Sender whitelist is enabled"))
+                        .into()
+                ),
+                "Sender is not whitelisted",
+            );
+        }
+
+        ContractEvent::Request {
+            xchain_id: self.xchain_id.clone(),
+            sender: sender_address(&transaction),
+            payload: hex::encode(&transaction.rlp()),
+            request_tokens_for_gas: tokens_for_gas(&transaction),
+        }
+        .emit();
+
         let sighash_bytes = transaction.sighash().0;
 
         ext_signer::ext(self.signer_contract_id.clone())
@@ -142,28 +185,33 @@ impl Contract {
         &mut self,
         transaction: TypedTransaction,
         #[callback_result] result: Result<ethers::types::Signature, PromiseError>,
-    ) -> Base64VecU8 {
+    ) -> String {
         let signature = result
             .unwrap_or_else(|e| env::panic_str(&format!("Failed to produce signature: {e:?}")));
 
-        let txid = transaction.hash(&signature);
         let rlp_signed = transaction.rlp_signed(&signature);
         let rlp_signed_hex = hex::encode(&rlp_signed);
 
-        let request_tokens_for_gas = transaction
-            .gas()
-            .zip(transaction.gas_price())
-            .map(|(gas, gas_price)| gas * gas_price);
+        let request_tokens_for_gas = tokens_for_gas(&transaction);
 
-        ContractEvent::Relay {
+        ContractEvent::Finalize {
             xchain_id: self.xchain_id.clone(),
-            sender: transaction.from().map(|a| to_checksum(a, None)),
-            payload_id: Some(hex::encode(txid.0)),
-            payload: rlp_signed_hex,
+            sender: sender_address(&transaction),
+            signed_payload: rlp_signed_hex,
             request_tokens_for_gas,
         }
         .emit();
 
-        rlp_signed.to_vec().into()
+        hex::encode(rlp_signed)
     }
+}
+
+fn sender_address(tx: &TypedTransaction) -> Option<String> {
+    tx.from().map(|from| to_checksum(from, None))
+}
+
+fn tokens_for_gas(tx: &TypedTransaction) -> Option<U256> {
+    tx.gas()
+        .zip(tx.gas_price())
+        .map(|(gas, gas_price)| gas * gas_price)
 }
