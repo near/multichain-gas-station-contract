@@ -1,9 +1,6 @@
 use ethers::{
     types::{transaction::eip2718::TypedTransaction, NameOrAddress},
-    utils::{
-        rlp::{Decodable, Rlp},
-        to_checksum,
-    },
+    utils::rlp::{Decodable, Rlp},
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
@@ -16,11 +13,14 @@ use near_sdk::{
 };
 use near_sdk_contract_tools::{event, owner::*, standard::nep297::Event, Owner};
 
-use crate::signer_contract::ext_signer;
-
 mod signer_contract;
+use signer_contract::ext_signer;
+
 mod xchain_address;
 use xchain_address::XChainAddress;
+
+mod utils;
+use utils::{address_from_hex, sender_address, tokens_for_gas};
 
 type XChainTokenAmount = ethers::types::U256;
 
@@ -63,7 +63,10 @@ pub enum StorageKey {
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Owner)]
 #[near_bindgen]
 pub struct Contract {
+    /// Identifies the target chain to the off-chain relayer.
     pub xchain_id: String,
+    /// The identifier that the xchain uses to identify itself.
+    /// For example, 1 for ETH mainnet, 97 for BSC mainnet...
     pub chain_id: U64,
     pub signer_contract_id: AccountId,
     pub sender_whitelist: UnorderedSet<XChainAddress>,
@@ -144,34 +147,7 @@ impl Contract {
         self.sender_whitelist.clear();
     }
 
-    pub fn xchain_relay(
-        &mut self,
-        transaction_json: Option<TypedTransaction>,
-        transaction_rlp: Option<String>,
-    ) -> Promise {
-        // Steps:
-        // 1. Filter & validate payload.
-        // 2. Request signature from MPC contract.
-        // 3. Emit signature as event.
-
-        let mut transaction = transaction_json
-            .or_else(|| {
-                transaction_rlp.map(|rlp_hex| {
-                    let rlp_bytes = hex::decode(rlp_hex).unwrap_or_else(|_| {
-                        env::panic_str("Error decoding `transaction_rlp` as hex")
-                    });
-                    let rlp = Rlp::new(&rlp_bytes);
-                    TypedTransaction::decode(&rlp).unwrap_or_else(|_| {
-                        env::panic_str("Error decoding `transaction_rlp` as transaction RLP")
-                    })
-                })
-            })
-            .unwrap_or_else(|| {
-                env::panic_str(
-                    "A transaction must be provided in `transaction_json` or `transaction_rlp`",
-                )
-            });
-
+    fn validate_transaction(&self, transaction: &mut TypedTransaction) {
         require!(
             transaction.gas().is_some(),
             "Gas must be explicitly specified",
@@ -221,6 +197,10 @@ impl Contract {
                 "Sender is not whitelisted",
             );
         }
+    }
+
+    fn xchain_relay_inner(&mut self, mut transaction: TypedTransaction) -> Promise {
+        self.validate_transaction(&mut transaction);
 
         ContractEvent::Request {
             xchain_id: self.xchain_id.clone(),
@@ -232,9 +212,43 @@ impl Contract {
 
         let sighash_bytes = transaction.sighash().0;
 
-        ext_signer::ext(self.signer_contract_id.clone())
+        ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
             .sign(sighash_bytes, self.xchain_id.clone())
             .then(Self::ext(env::current_account_id()).xchain_relay_callback(transaction))
+    }
+
+    pub fn xchain_relay(
+        &mut self,
+        transaction_json: Option<TypedTransaction>,
+        transaction_rlp: Option<String>,
+    ) -> Promise {
+        // TODO: Charge NEAR (or other FT) for gas fee.
+        // This may require a price oracle as well?
+
+        // Steps:
+        // 1. Filter & validate payload.
+        // 2. Request signature from MPC contract.
+        // 3. Emit signature as event.
+
+        let transaction = transaction_json
+            .or_else(|| {
+                transaction_rlp.map(|rlp_hex| {
+                    let rlp_bytes = hex::decode(rlp_hex).unwrap_or_else(|_| {
+                        env::panic_str("Error decoding `transaction_rlp` as hex")
+                    });
+                    let rlp = Rlp::new(&rlp_bytes);
+                    TypedTransaction::decode(&rlp).unwrap_or_else(|_| {
+                        env::panic_str("Error decoding `transaction_rlp` as transaction RLP")
+                    })
+                })
+            })
+            .unwrap_or_else(|| {
+                env::panic_str(
+                    "A transaction must be provided in `transaction_json` or `transaction_rlp`",
+                )
+            });
+
+        self.xchain_relay_inner(transaction)
     }
 
     #[private]
@@ -261,24 +275,4 @@ impl Contract {
 
         hex::encode(rlp_signed)
     }
-}
-
-fn sender_address(tx: &TypedTransaction) -> Option<String> {
-    tx.from().map(|from| to_checksum(from, None))
-}
-
-fn tokens_for_gas(tx: &TypedTransaction) -> Option<XChainTokenAmount> {
-    tx.gas()
-        .zip(tx.gas_price())
-        .map(|(gas, gas_price)| gas * gas_price)
-}
-
-/// Rejects transaction on decoding error
-fn address_from_hex(address: impl AsRef<[u8]>) -> XChainAddress {
-    XChainAddress(
-        hex::decode(address)
-            .unwrap_or_else(|_| env::panic_str("Error decoding address as hex"))
-            .try_into()
-            .unwrap_or_else(|_| env::panic_str("Address must be 20 bytes")),
-    )
 }
