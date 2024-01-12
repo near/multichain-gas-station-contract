@@ -1,5 +1,5 @@
 use ethers::{
-    types::{transaction::eip2718::TypedTransaction, NameOrAddress},
+    types::{transaction::eip2718::TypedTransaction, NameOrAddress, U256},
     utils::rlp::{Decodable, Rlp},
 };
 use near_sdk::{
@@ -72,6 +72,8 @@ pub struct Contract {
     pub sender_whitelist: UnorderedSet<XChainAddress>,
     pub receiver_whitelist: UnorderedSet<XChainAddress>,
     pub flags: Flags,
+    pub price_per_xchain_gas_token: (u128, u128),
+    pub price_scale: (u128, u128),
 }
 
 #[near_bindgen]
@@ -85,6 +87,9 @@ impl Contract {
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
             flags: Flags::default(),
+            // this value is approximately the number of yoctoNEAR per 1wei of ETH.
+            price_per_xchain_gas_token: (10u128.pow(24) * 2500, 10u128.pow(18) * 350 / 100), // TODO: Make dynamic / configurable
+            price_scale: (120, 100), // +20% on top of market price
         };
 
         Owner::init(&mut contract, &env::predecessor_account_id());
@@ -149,7 +154,7 @@ impl Contract {
 
     fn validate_transaction(&self, transaction: &mut TypedTransaction) {
         require!(
-            transaction.gas().is_some(),
+            transaction.gas().is_some() && transaction.gas_price().is_some(),
             "Gas must be explicitly specified",
         );
 
@@ -199,54 +204,65 @@ impl Contract {
         }
     }
 
-    fn xchain_relay_inner(&mut self, mut transaction: TypedTransaction) -> Promise {
-        self.validate_transaction(&mut transaction);
-
-        ContractEvent::Request {
-            xchain_id: self.xchain_id.clone(),
-            sender: transaction.from().map(Into::into),
-            unsigned_transaction: hex::encode(&transaction.rlp()),
-            request_tokens_for_gas: tokens_for_gas(&transaction),
-        }
-        .emit();
-
-        let sighash_bytes = transaction.sighash().0;
-
+    fn xchain_relay_inner(&mut self, transaction: TypedTransaction) -> Promise {
         ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
-            .sign(sighash_bytes, self.xchain_id.clone())
+            .sign(transaction.sighash().0, self.xchain_id.clone())
             .then(Self::ext(env::current_account_id()).xchain_relay_callback(transaction))
     }
 
+    fn fee_for_gas(&self, request_tokens_for_gas: XChainTokenAmount) -> u128 {
+        // calculate fee based on currently known price, and include scaling factor
+        let a = request_tokens_for_gas
+            * U256::from(self.price_per_xchain_gas_token.0)
+            * U256::from(self.price_scale.0);
+        let (b, rem) = a.div_mod(
+            U256::from(self.price_per_xchain_gas_token.1) * U256::from(self.price_scale.1),
+        );
+        // round up
+        if !rem.is_zero() { b + 1 } else { b }.as_u128()
+    }
+
+    #[payable]
     pub fn xchain_relay(
         &mut self,
         transaction_json: Option<TypedTransaction>,
         transaction_rlp: Option<String>,
     ) -> Promise {
-        // TODO: Charge NEAR (or other FT) for gas fee.
-        // This may require a price oracle as well?
-
         // Steps:
         // 1. Filter & validate payload.
         // 2. Request signature from MPC contract.
         // 3. Emit signature as event.
 
-        let transaction = transaction_json
-            .or_else(|| {
-                transaction_rlp.map(|rlp_hex| {
-                    let rlp_bytes = hex::decode(rlp_hex).unwrap_or_else(|_| {
-                        env::panic_str("Error decoding `transaction_rlp` as hex")
-                    });
-                    let rlp = Rlp::new(&rlp_bytes);
-                    TypedTransaction::decode(&rlp).unwrap_or_else(|_| {
-                        env::panic_str("Error decoding `transaction_rlp` as transaction RLP")
-                    })
-                })
-            })
-            .unwrap_or_else(|| {
-                env::panic_str(
-                    "A transaction must be provided in `transaction_json` or `transaction_rlp`",
-                )
-            });
+        let mut transaction = get_transaction(transaction_json, transaction_rlp);
+
+        self.validate_transaction(&mut transaction);
+
+        let request_tokens_for_gas = tokens_for_gas(&transaction).unwrap(); // Validation ensures gas is set.
+
+        let fee = self.fee_for_gas(request_tokens_for_gas);
+
+        let deposit = env::attached_deposit();
+
+        match deposit.checked_sub(fee) {
+            None => {
+                env::panic_str(&format!(
+                    "Attached deposit ({deposit}) is less than fee ({fee})"
+                ));
+            }
+            Some(0) => {} // No refund; payment is exact.
+            Some(refund) => {
+                // Refund excess
+                Promise::new(env::predecessor_account_id()).transfer(refund);
+            }
+        }
+
+        ContractEvent::Request {
+            xchain_id: self.xchain_id.clone(),
+            sender: transaction.from().map(Into::into),
+            unsigned_transaction: hex::encode(&transaction.rlp()),
+            request_tokens_for_gas: Some(request_tokens_for_gas),
+        }
+        .emit();
 
         self.xchain_relay_inner(transaction)
     }
@@ -275,4 +291,26 @@ impl Contract {
 
         hex::encode(rlp_signed)
     }
+}
+
+fn get_transaction(
+    transaction_json: Option<TypedTransaction>,
+    transaction_rlp: Option<String>,
+) -> TypedTransaction {
+    transaction_json
+        .or_else(|| {
+            transaction_rlp.map(|rlp_hex| {
+                let rlp_bytes = hex::decode(rlp_hex)
+                    .unwrap_or_else(|_| env::panic_str("Error decoding `transaction_rlp` as hex"));
+                let rlp = Rlp::new(&rlp_bytes);
+                TypedTransaction::decode(&rlp).unwrap_or_else(|_| {
+                    env::panic_str("Error decoding `transaction_rlp` as transaction RLP")
+                })
+            })
+        })
+        .unwrap_or_else(|| {
+            env::panic_str(
+                "A transaction must be provided in `transaction_json` or `transaction_rlp`",
+            )
+        })
 }
