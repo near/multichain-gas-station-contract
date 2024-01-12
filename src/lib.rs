@@ -20,7 +20,7 @@ mod xchain_address;
 use xchain_address::XChainAddress;
 
 mod utils;
-use utils::{address_from_hex, sender_address, tokens_for_gas};
+use utils::*;
 
 type XChainTokenAmount = ethers::types::U256;
 
@@ -34,13 +34,13 @@ type XChainTokenAmount = ethers::types::U256;
 pub enum ContractEvent {
     Request {
         xchain_id: String,
-        sender: Option<String>,
+        sender: Option<XChainAddress>,
         unsigned_transaction: String,
         request_tokens_for_gas: Option<XChainTokenAmount>,
     },
     Finalize {
         xchain_id: String,
-        sender: Option<String>,
+        sender: Option<XChainAddress>,
         signed_transaction: String,
         request_tokens_for_gas: Option<XChainTokenAmount>,
     },
@@ -101,21 +101,21 @@ impl Contract {
         self.flags = flags;
     }
 
-    pub fn get_receiver_whitelist(&self) -> Vec<String> {
-        self.receiver_whitelist.iter().map(hex::encode).collect()
+    pub fn get_receiver_whitelist(&self) -> Vec<&XChainAddress> {
+        self.receiver_whitelist.iter().collect()
     }
 
-    pub fn add_to_receiver_whitelist(&mut self, addresses: Vec<String>) {
+    pub fn add_to_receiver_whitelist(&mut self, addresses: Vec<XChainAddress>) {
         self.assert_owner();
         for address in addresses {
-            self.receiver_whitelist.insert(address_from_hex(address));
+            self.receiver_whitelist.insert(address);
         }
     }
 
-    pub fn remove_from_receiver_whitelist(&mut self, addresses: Vec<String>) {
+    pub fn remove_from_receiver_whitelist(&mut self, addresses: Vec<XChainAddress>) {
         self.assert_owner();
         for address in addresses {
-            self.receiver_whitelist.remove(&address_from_hex(address));
+            self.receiver_whitelist.remove(&address);
         }
     }
 
@@ -124,21 +124,21 @@ impl Contract {
         self.receiver_whitelist.clear();
     }
 
-    pub fn get_sender_whitelist(&self) -> Vec<String> {
-        self.sender_whitelist.iter().map(hex::encode).collect()
+    pub fn get_sender_whitelist(&self) -> Vec<&XChainAddress> {
+        self.sender_whitelist.iter().collect()
     }
 
-    pub fn add_to_sender_whitelist(&mut self, addresses: Vec<String>) {
+    pub fn add_to_sender_whitelist(&mut self, addresses: Vec<XChainAddress>) {
         self.assert_owner();
         for address in addresses {
-            self.sender_whitelist.insert(address_from_hex(address));
+            self.sender_whitelist.insert(address);
         }
     }
 
-    pub fn remove_from_sender_whitelist(&mut self, addresses: Vec<String>) {
+    pub fn remove_from_sender_whitelist(&mut self, addresses: Vec<XChainAddress>) {
         self.assert_owner();
         for address in addresses {
-            self.sender_whitelist.remove(&address_from_hex(address));
+            self.sender_whitelist.remove(&address);
         }
     }
 
@@ -204,7 +204,7 @@ impl Contract {
 
         ContractEvent::Request {
             xchain_id: self.xchain_id.clone(),
-            sender: sender_address(&transaction),
+            sender: transaction.from().map(Into::into),
             unsigned_transaction: hex::encode(&transaction.rlp()),
             request_tokens_for_gas: tokens_for_gas(&transaction),
         }
@@ -267,7 +267,7 @@ impl Contract {
 
         ContractEvent::Finalize {
             xchain_id: self.xchain_id.clone(),
-            sender: sender_address(&transaction),
+            sender: transaction.from().map(Into::into),
             signed_transaction: rlp_signed_hex,
             request_tokens_for_gas,
         }
