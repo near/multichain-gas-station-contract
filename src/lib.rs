@@ -32,15 +32,15 @@ type XChainTokenAmount = ethers::types::U256;
 /// within the contract.
 #[event(version = "0.1.0", standard = "x-multichain-sig")]
 pub enum ContractEvent {
-    Request {
+    RequestTransactionSignature {
         xchain_id: String,
-        sender: Option<XChainAddress>,
+        sender_address: Option<XChainAddress>,
         unsigned_transaction: String,
         request_tokens_for_gas: Option<XChainTokenAmount>,
     },
-    Finalize {
+    FinalizeTransactionSignature {
         xchain_id: String,
-        sender: Option<XChainAddress>,
+        sender_address: Option<XChainAddress>,
         signed_transaction: String,
         request_tokens_for_gas: Option<XChainTokenAmount>,
     },
@@ -67,7 +67,7 @@ pub struct Contract {
     pub xchain_id: String,
     /// The identifier that the xchain uses to identify itself.
     /// For example, 1 for ETH mainnet, 97 for BSC mainnet...
-    pub chain_id: U64,
+    pub xchain_chain_id: U64,
     pub signer_contract_id: AccountId,
     pub sender_whitelist: UnorderedSet<XChainAddress>,
     pub receiver_whitelist: UnorderedSet<XChainAddress>,
@@ -79,10 +79,10 @@ pub struct Contract {
 #[near_bindgen]
 impl Contract {
     #[init]
-    pub fn new(xchain_id: String, chain_id: U64, signer_contract_id: AccountId) -> Self {
+    pub fn new(xchain_id: String, xchain_chain_id: U64, signer_contract_id: AccountId) -> Self {
         let mut contract = Self {
             xchain_id,
-            chain_id,
+            xchain_chain_id,
             signer_contract_id,
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
@@ -159,10 +159,13 @@ impl Contract {
         );
 
         if let Some(chain_id) = transaction.chain_id() {
-            require!(chain_id.as_u64() == self.chain_id.0, "Chain ID mismatch");
+            require!(
+                chain_id.as_u64() == self.xchain_chain_id.0,
+                "Chain ID mismatch"
+            );
         }
 
-        transaction.set_chain_id(self.chain_id.0);
+        transaction.set_chain_id(self.xchain_chain_id.0);
 
         // Validate receiver
         let receiver: Option<XChainAddress> = match transaction.to() {
@@ -210,7 +213,7 @@ impl Contract {
             .then(Self::ext(env::current_account_id()).xchain_relay_callback(transaction))
     }
 
-    fn fee_for_gas(&self, request_tokens_for_gas: XChainTokenAmount) -> u128 {
+    fn price_of_gas(&self, request_tokens_for_gas: XChainTokenAmount) -> u128 {
         // calculate fee based on currently known price, and include scaling factor
         let a = request_tokens_for_gas
             * U256::from(self.price_per_xchain_gas_token.0)
@@ -233,13 +236,13 @@ impl Contract {
         // 2. Request signature from MPC contract.
         // 3. Emit signature as event.
 
-        let mut transaction = get_transaction(transaction_json, transaction_rlp);
+        let mut transaction = extract_transaction(transaction_json, transaction_rlp);
 
         self.validate_transaction(&mut transaction);
 
         let request_tokens_for_gas = tokens_for_gas(&transaction).unwrap(); // Validation ensures gas is set.
 
-        let fee = self.fee_for_gas(request_tokens_for_gas);
+        let fee = self.price_of_gas(request_tokens_for_gas);
 
         let deposit = env::attached_deposit();
 
@@ -256,9 +259,9 @@ impl Contract {
             }
         }
 
-        ContractEvent::Request {
+        ContractEvent::RequestTransactionSignature {
             xchain_id: self.xchain_id.clone(),
-            sender: transaction.from().map(Into::into),
+            sender_address: transaction.from().map(Into::into),
             unsigned_transaction: hex::encode(&transaction.rlp()),
             request_tokens_for_gas: Some(request_tokens_for_gas),
         }
@@ -271,7 +274,7 @@ impl Contract {
     pub fn xchain_relay_callback(
         &mut self,
         transaction: TypedTransaction,
-        #[callback_result] result: Result<ethers::types::Signature, PromiseError>,
+        #[callback_result] result: Result<ethers::types::Signature, PromiseError>, // NOTE: The exact format of the result is uncertain, but it should contain the same information regardless.
     ) -> String {
         let signature = result
             .unwrap_or_else(|e| env::panic_str(&format!("Failed to produce signature: {e:?}")));
@@ -281,9 +284,9 @@ impl Contract {
 
         let request_tokens_for_gas = tokens_for_gas(&transaction);
 
-        ContractEvent::Finalize {
+        ContractEvent::FinalizeTransactionSignature {
             xchain_id: self.xchain_id.clone(),
-            sender: transaction.from().map(Into::into),
+            sender_address: transaction.from().map(Into::into),
             signed_transaction: rlp_signed_hex,
             request_tokens_for_gas,
         }
@@ -293,7 +296,7 @@ impl Contract {
     }
 }
 
-fn get_transaction(
+fn extract_transaction(
     transaction_json: Option<TypedTransaction>,
     transaction_rlp: Option<String>,
 ) -> TypedTransaction {
