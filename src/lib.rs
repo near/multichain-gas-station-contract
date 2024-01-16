@@ -14,7 +14,7 @@ use near_sdk::{
 use near_sdk_contract_tools::{event, owner::*, standard::nep297::Event, Owner};
 
 mod signer_contract;
-use signer_contract::ext_signer;
+use signer_contract::{ext_signer, MpcSignature};
 
 mod xchain_address;
 use xchain_address::XChainAddress;
@@ -152,7 +152,7 @@ impl Contract {
         self.sender_whitelist.clear();
     }
 
-    fn validate_transaction(&self, transaction: &mut TypedTransaction) {
+    fn validate_transaction(&self, transaction: &TypedTransaction) {
         require!(
             transaction.gas().is_some() && transaction.gas_price().is_some(),
             "Gas must be explicitly specified",
@@ -164,8 +164,6 @@ impl Contract {
                 "Chain ID mismatch"
             );
         }
-
-        transaction.set_chain_id(self.xchain_chain_id.0);
 
         // Validate receiver
         let receiver: Option<XChainAddress> = match transaction.to() {
@@ -222,7 +220,7 @@ impl Contract {
             U256::from(self.price_per_xchain_gas_token.1) * U256::from(self.price_scale.1),
         );
         // round up
-        if !rem.is_zero() { b + 1 } else { b }.as_u128()
+        if rem.is_zero() { b } else { b + 1 }.as_u128()
     }
 
     #[payable]
@@ -238,12 +236,11 @@ impl Contract {
 
         let mut transaction = extract_transaction(transaction_json, transaction_rlp);
 
-        self.validate_transaction(&mut transaction);
+        self.validate_transaction(&transaction);
+        transaction.set_chain_id(self.xchain_chain_id.0);
 
         let request_tokens_for_gas = tokens_for_gas(&transaction).unwrap(); // Validation ensures gas is set.
-
         let fee = self.price_of_gas(request_tokens_for_gas);
-
         let deposit = env::attached_deposit();
 
         match deposit.checked_sub(fee) {
@@ -274,10 +271,12 @@ impl Contract {
     pub fn xchain_relay_callback(
         &mut self,
         transaction: TypedTransaction,
-        #[callback_result] result: Result<ethers::types::Signature, PromiseError>, // NOTE: The exact format of the result is uncertain, but it should contain the same information regardless.
+        #[callback_result] result: Result<MpcSignature, PromiseError>,
     ) -> String {
-        let signature = result
-            .unwrap_or_else(|e| env::panic_str(&format!("Failed to produce signature: {e:?}")));
+        let signature: ethers::types::Signature = result
+            .unwrap_or_else(|e| env::panic_str(&format!("Failed to produce signature: {e:?}")))
+            .try_into()
+            .unwrap_or_else(|e| env::panic_str(&format!("Failed to decode signature: {e:?}")));
 
         let rlp_signed = transaction.rlp_signed(&signature);
         let rlp_signed_hex = hex::encode(&rlp_signed);

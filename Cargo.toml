@@ -16,6 +16,7 @@ near-sdk-contract-tools = "2"
 
 # make this package happy for wasm target
 getrandom = { version = "0.2", features = ["js"] }
+thiserror = "1"
 
 [lib]
 crate-type = ["cdylib"]
