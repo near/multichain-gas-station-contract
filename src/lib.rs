@@ -292,7 +292,12 @@ impl Contract {
         }
         .emit();
 
-        hex::encode(rlp_signed)
+        // Currently, this is returning the transaction ID (transaction hash),
+        // since that is what the `eth_sendTransaction` RPC call does. However,
+        // it is potentially more useful to return the signed payload. Until it
+        // is determined that this is actually necessary, though, we are going
+        // to stick close to the ETH RPC convention.
+        hex::encode(transaction.hash(&signature))
     }
 }
 
