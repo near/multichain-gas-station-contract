@@ -13,17 +13,17 @@ use near_sdk::{
 };
 use near_sdk_contract_tools::{event, owner::*, standard::nep297::Event, Owner};
 
-mod signer_contract;
-use signer_contract::{
-    ext_signer, key_path, MpcSignature, ProtocolContractState, ResharingContractState,
-    RunningContractState,
-};
+mod oracle;
 
-mod xchain_address;
-use xchain_address::XChainAddress;
+mod signer_contract;
+use oracle::{ext_oracle, AssetOptionalPrice, PriceData};
+use signer_contract::{ext_signer, key_path, MpcSignature};
 
 mod utils;
 use utils::*;
+
+mod xchain_address;
+use xchain_address::XChainAddress;
 
 type XChainTokenAmount = ethers::types::U256;
 
@@ -67,42 +67,61 @@ pub enum StorageKey {
 #[near_bindgen]
 pub struct Contract {
     /// Identifies the target chain to the off-chain relayer.
-    pub xchain_id: String,
-    /// The identifier that the xchain uses to identify itself.
+    /// For example, "ETH", "zkSync", etc.
+    pub foreign_chain: String,
+    /// The identifier that the foreign chain uses to identify itself.
     /// For example, 1 for ETH mainnet, 97 for BSC mainnet...
-    pub xchain_chain_id: U64,
+    pub foreign_internal_chain_id: U64,
     pub signer_contract_id: AccountId,
-    pub signer_public_key: Option<near_sdk::PublicKey>,
+    pub oracle_id: AccountId,
+    pub oracle_local_asset_id: String,
+    pub oracle_xchain_asset_id: String,
     pub sender_whitelist: UnorderedSet<XChainAddress>,
     pub receiver_whitelist: UnorderedSet<XChainAddress>,
     pub flags: Flags,
-    pub price_per_xchain_gas_token: (u128, u128),
+    pub gas_token_price: Option<GasTokenPrice>,
     pub price_scale: (u128, u128),
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct GasTokenPrice {
+    pub local_per_xchain: (u128, u128),
+    pub updated_at_block_height: u64,
 }
 
 #[near_bindgen]
 impl Contract {
     #[init]
-    pub fn new(xchain_id: String, xchain_chain_id: U64, signer_contract_id: AccountId) -> Self {
+    pub fn new(
+        foreign_chain: String,
+        foreign_internal_chain_id: U64,
+        signer_contract_id: AccountId,
+        oracle_id: AccountId,
+        oracle_local_asset_id: String,
+        oracle_xchain_asset_id: String,
+    ) -> Self {
         let mut contract = Self {
-            xchain_id,
-            xchain_chain_id,
+            foreign_chain,
+            foreign_internal_chain_id,
             signer_contract_id,
-            signer_public_key: None,
+            oracle_id,
+            oracle_local_asset_id,
+            oracle_xchain_asset_id,
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
             flags: Flags::default(),
-            // this value is approximately the number of yoctoNEAR per 1wei of ETH.
-            price_per_xchain_gas_token: (10u128.pow(24) * 2500, 10u128.pow(18) * 350 / 100), // TODO: Make dynamic / configurable
+            gas_token_price: None,
             price_scale: (120, 100), // +20% on top of market price
         };
 
         Owner::init(&mut contract, &env::predecessor_account_id());
 
-        contract.refresh_mpc_public_key();
+        contract.fetch_oracle(); // update oracle immediately
 
         contract
     }
+
+    // Public contract config getters/setters
 
     pub fn get_flags(&self) -> &Flags {
         &self.flags
@@ -159,6 +178,58 @@ impl Contract {
         self.sender_whitelist.clear();
     }
 
+    pub fn fetch_oracle(&mut self) -> Promise {
+        // TODO: Does this method need access control or assert_one_yocto?
+        ext_oracle::ext(self.oracle_id.clone()).get_price_data(Some(vec![
+            self.oracle_local_asset_id.clone(),
+            self.oracle_xchain_asset_id.clone(),
+        ]))
+    }
+
+    #[private]
+    pub fn fetch_oracle_callback(
+        &mut self,
+        #[callback_result] result: Result<PriceData, PromiseError>,
+    ) {
+        let price_data = result.unwrap_or_else(|_| env::panic_str("Failed to fetch price data"));
+
+        let (local_price, xchain_price) = match &price_data.prices[..] {
+            [AssetOptionalPrice {
+                asset_id: first_asset_id,
+                price: Some(first_price),
+            }, AssetOptionalPrice {
+                asset_id: second_asset_id,
+                price: Some(second_price),
+            }] if first_asset_id == &self.oracle_local_asset_id
+                && second_asset_id == &self.oracle_xchain_asset_id =>
+            {
+                (first_price, second_price)
+            }
+            _ => env::panic_str("Invalid price data"),
+        };
+
+        self.gas_token_price = Some(GasTokenPrice {
+            local_per_xchain: (
+                xchain_price.multiplier.0 * u128::from(local_price.decimals),
+                local_price.multiplier.0 * u128::from(xchain_price.decimals),
+            ),
+            updated_at_block_height: env::block_height(),
+        });
+    }
+
+    // Private helper methods
+
+    fn price_of_gas(&self, request_tokens_for_gas: XChainTokenAmount) -> Option<u128> {
+        // calculate fee based on currently known price, and include scaling factor
+        // TODO: Check price data freshness
+        let conversion_rate = self.gas_token_price.as_ref()?.local_per_xchain;
+        let a =
+            request_tokens_for_gas * U256::from(conversion_rate.0) * U256::from(self.price_scale.0);
+        let (b, rem) = a.div_mod(U256::from(conversion_rate.1) * U256::from(self.price_scale.1));
+        // round up
+        Some(if rem.is_zero() { b } else { b + 1 }.as_u128())
+    }
+
     fn validate_transaction(&self, transaction: &TypedTransaction) {
         require!(
             transaction.gas().is_some() && transaction.gas_price().is_some(),
@@ -167,7 +238,7 @@ impl Contract {
 
         if let Some(chain_id) = transaction.chain_id() {
             require!(
-                chain_id.as_u64() == self.xchain_chain_id.0,
+                chain_id.as_u64() == self.foreign_internal_chain_id.0,
                 "Chain ID mismatch"
             );
         }
@@ -216,51 +287,12 @@ impl Contract {
         ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
             .sign(
                 transaction.sighash().0,
-                key_path(&self.xchain_id, &env::predecessor_account_id()),
+                key_path(&self.foreign_chain, &env::predecessor_account_id()),
             )
             .then(Self::ext(env::current_account_id()).xchain_relay_callback(transaction))
     }
 
-    fn price_of_gas(&self, request_tokens_for_gas: XChainTokenAmount) -> u128 {
-        // calculate fee based on currently known price, and include scaling factor
-        let a = request_tokens_for_gas
-            * U256::from(self.price_per_xchain_gas_token.0)
-            * U256::from(self.price_scale.0);
-        let (b, rem) = a.div_mod(
-            U256::from(self.price_per_xchain_gas_token.1) * U256::from(self.price_scale.1),
-        );
-        // round up
-        if rem.is_zero() { b } else { b + 1 }.as_u128()
-    }
-
-    // This process many not be necessary, as it can be accomplished by the
-    // client using only view calls.
-    pub fn refresh_mpc_public_key(&self) -> Promise {
-        self.assert_owner();
-
-        ext_signer::ext(self.signer_contract_id.clone())
-            .state()
-            .then(Self::ext(env::current_account_id()).refresh_mpc_public_key_callback())
-    }
-
-    #[private]
-    pub fn refresh_mpc_public_key_callback(
-        &mut self,
-        #[callback_result] result: Result<ProtocolContractState, PromiseError>,
-    ) {
-        let public_key =
-            match result.unwrap_or_else(|_| env::panic_str("Failed to refresh MPC public key")) {
-                ProtocolContractState::NotInitialized | ProtocolContractState::Initializing(_) => {
-                    env::panic_str("MPC contract is not initialized");
-                }
-                ProtocolContractState::Running(RunningContractState { public_key, .. })
-                | ProtocolContractState::Resharing(ResharingContractState { public_key, .. }) => {
-                    public_key
-                }
-            };
-
-        self.signer_public_key = Some(public_key);
-    }
+    // Public methods
 
     #[payable]
     pub fn xchain_relay(
@@ -276,10 +308,12 @@ impl Contract {
         let mut transaction = extract_transaction(transaction_json, transaction_rlp);
 
         self.validate_transaction(&transaction);
-        transaction.set_chain_id(self.xchain_chain_id.0);
+        transaction.set_chain_id(self.foreign_internal_chain_id.0);
 
         let request_tokens_for_gas = tokens_for_gas(&transaction).unwrap(); // Validation ensures gas is set.
-        let fee = self.price_of_gas(request_tokens_for_gas);
+        let fee = self
+            .price_of_gas(request_tokens_for_gas)
+            .unwrap_or_else(|| env::panic_str("No gas price available"));
         let deposit = env::attached_deposit();
 
         match deposit.checked_sub(fee) {
@@ -296,7 +330,7 @@ impl Contract {
         }
 
         ContractEvent::RequestTransactionSignature {
-            xchain_id: self.xchain_id.clone(),
+            xchain_id: self.foreign_chain.clone(),
             sender_address: transaction.from().map(Into::into),
             unsigned_transaction: hex::encode(&transaction.rlp()),
             request_tokens_for_gas: Some(request_tokens_for_gas),
@@ -323,7 +357,7 @@ impl Contract {
         let request_tokens_for_gas = tokens_for_gas(&transaction);
 
         ContractEvent::FinalizeTransactionSignature {
-            xchain_id: self.xchain_id.clone(),
+            xchain_id: self.foreign_chain.clone(),
             sender_address: transaction.from().map(Into::into),
             signed_transaction: rlp_signed_hex,
             request_tokens_for_gas,
