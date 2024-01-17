@@ -1,13 +1,17 @@
 use near_sdk::{
     ext_contract,
     serde::{Deserialize, Serialize},
-    Promise,
+    AccountId, Promise,
 };
 use thiserror::Error;
 
 #[ext_contract(ext_signer)]
 pub trait SignerContract {
     fn sign(&mut self, payload: [u8; 32], path: String) -> Promise;
+}
+
+pub fn key_path(xchain_id: &str, signer_id: &AccountId) -> String {
+    format!("{signer_id}@{xchain_id}")
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

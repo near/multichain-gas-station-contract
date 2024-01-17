@@ -14,7 +14,7 @@ use near_sdk::{
 use near_sdk_contract_tools::{event, owner::*, standard::nep297::Event, Owner};
 
 mod signer_contract;
-use signer_contract::{ext_signer, MpcSignature};
+use signer_contract::{ext_signer, key_path, MpcSignature};
 
 mod xchain_address;
 use xchain_address::XChainAddress;
@@ -207,7 +207,10 @@ impl Contract {
 
     fn xchain_relay_inner(&mut self, transaction: TypedTransaction) -> Promise {
         ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
-            .sign(transaction.sighash().0, self.xchain_id.clone())
+            .sign(
+                transaction.sighash().0,
+                key_path(&self.xchain_id, &env::predecessor_account_id()),
+            )
             .then(Self::ext(env::current_account_id()).xchain_relay_callback(transaction))
     }
 
