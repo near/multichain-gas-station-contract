@@ -1,13 +1,40 @@
 use near_sdk::{
+    borsh::{self, BorshDeserialize, BorshSerialize},
     ext_contract,
     serde::{Deserialize, Serialize},
-    AccountId, Promise,
+    AccountId, Promise, PublicKey,
 };
 use thiserror::Error;
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct InitializingContractState {}
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct RunningContractState {
+    pub public_key: PublicKey,
+}
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ResharingContractState {
+    pub public_key: PublicKey,
+}
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub enum ProtocolContractState {
+    NotInitialized,
+    Initializing(InitializingContractState),
+    Running(RunningContractState),
+    Resharing(ResharingContractState),
+}
 
 #[ext_contract(ext_signer)]
 pub trait SignerContract {
     fn sign(&mut self, payload: [u8; 32], path: String) -> Promise;
+    fn state(&self) -> ProtocolContractState;
 }
 
 pub fn key_path(xchain_id: &str, signer_id: &AccountId) -> String {

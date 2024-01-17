@@ -14,7 +14,10 @@ use near_sdk::{
 use near_sdk_contract_tools::{event, owner::*, standard::nep297::Event, Owner};
 
 mod signer_contract;
-use signer_contract::{ext_signer, key_path, MpcSignature};
+use signer_contract::{
+    ext_signer, key_path, MpcSignature, ProtocolContractState, ResharingContractState,
+    RunningContractState,
+};
 
 mod xchain_address;
 use xchain_address::XChainAddress;
@@ -69,6 +72,7 @@ pub struct Contract {
     /// For example, 1 for ETH mainnet, 97 for BSC mainnet...
     pub xchain_chain_id: U64,
     pub signer_contract_id: AccountId,
+    pub signer_public_key: Option<near_sdk::PublicKey>,
     pub sender_whitelist: UnorderedSet<XChainAddress>,
     pub receiver_whitelist: UnorderedSet<XChainAddress>,
     pub flags: Flags,
@@ -84,6 +88,7 @@ impl Contract {
             xchain_id,
             xchain_chain_id,
             signer_contract_id,
+            signer_public_key: None,
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
             flags: Flags::default(),
@@ -93,6 +98,8 @@ impl Contract {
         };
 
         Owner::init(&mut contract, &env::predecessor_account_id());
+
+        contract.refresh_mpc_public_key();
 
         contract
     }
@@ -224,6 +231,35 @@ impl Contract {
         );
         // round up
         if rem.is_zero() { b } else { b + 1 }.as_u128()
+    }
+
+    // This process many not be necessary, as it can be accomplished by the
+    // client using only view calls.
+    pub fn refresh_mpc_public_key(&self) -> Promise {
+        self.assert_owner();
+
+        ext_signer::ext(self.signer_contract_id.clone())
+            .state()
+            .then(Self::ext(env::current_account_id()).refresh_mpc_public_key_callback())
+    }
+
+    #[private]
+    pub fn refresh_mpc_public_key_callback(
+        &mut self,
+        #[callback_result] result: Result<ProtocolContractState, PromiseError>,
+    ) {
+        let public_key =
+            match result.unwrap_or_else(|_| env::panic_str("Failed to refresh MPC public key")) {
+                ProtocolContractState::NotInitialized | ProtocolContractState::Initializing(_) => {
+                    env::panic_str("MPC contract is not initialized");
+                }
+                ProtocolContractState::Running(RunningContractState { public_key, .. })
+                | ProtocolContractState::Resharing(ResharingContractState { public_key, .. }) => {
+                    public_key
+                }
+            };
+
+        self.signer_public_key = Some(public_key);
     }
 
     #[payable]

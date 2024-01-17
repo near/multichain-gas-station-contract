@@ -6,6 +6,9 @@ edition = "2021"
 
 [dependencies]
 ethers = { version = "2", default-features = false }
+getrandom = { version = "0.2", features = [
+    "js",
+] } # make this package happy for wasm target
 hex = "0.4"
 near-sdk = { version = "4.1.1", default-features = false, features = [
     "wee_alloc",
@@ -13,9 +16,6 @@ near-sdk = { version = "4.1.1", default-features = false, features = [
     "abi",
 ] }
 near-sdk-contract-tools = "2"
-
-# make this package happy for wasm target
-getrandom = { version = "0.2", features = ["js"] }
 thiserror = "1"
 
 [lib]
