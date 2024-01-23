@@ -2,7 +2,7 @@ use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     ext_contract,
     serde::{Deserialize, Serialize},
-    AccountId, Promise, PublicKey,
+    Promise, PublicKey,
 };
 use thiserror::Error;
 
@@ -35,10 +35,6 @@ pub enum ProtocolContractState {
 pub trait SignerContract {
     fn sign(&mut self, payload: [u8; 32], path: String) -> Promise;
     fn state(&self) -> ProtocolContractState;
-}
-
-pub fn key_path(xchain_id: &str, signer_id: &AccountId) -> String {
-    format!("{signer_id}@{xchain_id}")
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

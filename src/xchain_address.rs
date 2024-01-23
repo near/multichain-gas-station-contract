@@ -3,7 +3,7 @@ use std::{fmt::Display, str::FromStr};
 use ethers::{types::H160, utils::to_checksum};
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 
-#[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Clone, Debug)]
 pub struct XChainAddress(pub [u8; 20]);
 
 impl near_sdk::serde::Serialize for XChainAddress {

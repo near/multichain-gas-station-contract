@@ -1,5 +1,5 @@
 use ethers::{
-    types::{transaction::eip2718::TypedTransaction, NameOrAddress, U256},
+    types::{transaction::eip2718::TypedTransaction, NameOrAddress, TransactionRequest, U256},
     utils::rlp::{Decodable, Rlp},
 };
 use near_sdk::{
@@ -17,7 +17,7 @@ mod oracle;
 
 mod signer_contract;
 use oracle::{ext_oracle, AssetOptionalPrice, PriceData};
-use signer_contract::{ext_signer, key_path, MpcSignature};
+use signer_contract::{ext_signer, MpcSignature};
 
 mod utils;
 use utils::*;
@@ -45,16 +45,29 @@ pub enum ContractEvent {
         xchain_id: String,
         sender_address: Option<XChainAddress>,
         signed_transaction: String,
+        signed_paymaster_transaction: String,
         request_tokens_for_gas: Option<XChainTokenAmount>,
     },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct TransactionDetails {
+    signed_transaction: String,
+    signed_paymaster_transaction: String,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(crate = "near_sdk::serde")]
 pub struct Flags {
-    is_deployment_allowed: bool,
     is_sender_whitelist_enabled: bool,
     is_receiver_whitelist_enabled: bool,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct GasTokenPrice {
+    pub local_per_xchain: (u128, u128),
+    pub updated_at_block_height: u64,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, BorshStorageKey, Hash, Clone, Debug, PartialEq, Eq)]
@@ -81,12 +94,6 @@ pub struct Contract {
     pub flags: Flags,
     pub gas_token_price: Option<GasTokenPrice>,
     pub price_scale: (u128, u128),
-}
-
-#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
-pub struct GasTokenPrice {
-    pub local_per_xchain: (u128, u128),
-    pub updated_at_block_height: u64,
 }
 
 #[near_bindgen]
@@ -262,12 +269,9 @@ impl Contract {
                 );
             }
         } else {
-            // No receiver == contract deployment
-            require!(
-                self.flags.is_deployment_allowed,
-                "Deployment is not allowed"
-            );
-        }
+            // No receiver means contract deployment
+            env::panic_str("Deployment is not allowed");
+        };
 
         // Check sender whitelist
         if self.flags.is_sender_whitelist_enabled {
@@ -283,28 +287,19 @@ impl Contract {
         }
     }
 
-    fn xchain_relay_inner(&mut self, transaction: TypedTransaction) -> Promise {
+    fn request_signature(&mut self, key_path: String, transaction: &TypedTransaction) -> Promise {
         ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
-            .sign(
-                transaction.sighash().0,
-                key_path(&self.foreign_chain, &env::predecessor_account_id()),
-            )
-            .then(Self::ext(env::current_account_id()).xchain_relay_callback(transaction))
+            .sign(transaction.sighash().0, key_path)
     }
 
     // Public methods
 
     #[payable]
-    pub fn xchain_relay(
+    pub fn xchain_sign(
         &mut self,
         transaction_json: Option<TypedTransaction>,
         transaction_rlp: Option<String>,
     ) -> Promise {
-        // Steps:
-        // 1. Filter & validate payload.
-        // 2. Request signature from MPC contract.
-        // 3. Emit signature as event.
-
         let mut transaction = extract_transaction(transaction_json, transaction_rlp);
 
         self.validate_transaction(&transaction);
@@ -337,39 +332,64 @@ impl Contract {
         }
         .emit();
 
-        self.xchain_relay_inner(transaction)
+        let paymaster_transaction: TypedTransaction = TransactionRequest {
+            chain_id: Some(self.foreign_internal_chain_id.0.into()),
+            from: None, // TODO: PK gen
+            to: Some((*transaction.from().unwrap()).into()),
+            value: Some(request_tokens_for_gas),
+            ..Default::default()
+        }
+        .into();
+
+        self.request_signature("$".to_string(), &paymaster_transaction)
+            .and(self.request_signature(env::predecessor_account_id().to_string(), &transaction))
+            .then(
+                Self::ext(env::current_account_id())
+                    .request_signature_callback(paymaster_transaction, transaction),
+            )
     }
 
     #[private]
-    pub fn xchain_relay_callback(
+    pub fn request_signature_callback(
         &mut self,
+        paymaster_transaction: TypedTransaction,
         transaction: TypedTransaction,
+        #[callback_result] paymaster_result: Result<MpcSignature, PromiseError>,
         #[callback_result] result: Result<MpcSignature, PromiseError>,
-    ) -> String {
-        let signature: ethers::types::Signature = result
-            .unwrap_or_else(|e| env::panic_str(&format!("Failed to produce signature: {e:?}")))
-            .try_into()
-            .unwrap_or_else(|e| env::panic_str(&format!("Failed to decode signature: {e:?}")));
+    ) -> TransactionDetails {
+        fn unwrap_signature(
+            result: Result<MpcSignature, PromiseError>,
+        ) -> ethers::types::Signature {
+            result
+                .unwrap_or_else(|e| env::panic_str(&format!("Failed to produce signature: {e:?}")))
+                .try_into()
+                .unwrap_or_else(|e| env::panic_str(&format!("Failed to decode signature: {e:?}")))
+        }
+
+        let signature = unwrap_signature(result);
+        let paymaster_signature = unwrap_signature(paymaster_result);
 
         let rlp_signed = transaction.rlp_signed(&signature);
         let rlp_signed_hex = hex::encode(&rlp_signed);
 
         let request_tokens_for_gas = tokens_for_gas(&transaction);
 
+        let paymaster_rlp_signed = paymaster_transaction.rlp_signed(&paymaster_signature);
+        let paymaster_rlp_signed_hex = hex::encode(&paymaster_rlp_signed);
+
         ContractEvent::FinalizeTransactionSignature {
             xchain_id: self.foreign_chain.clone(),
             sender_address: transaction.from().map(Into::into),
-            signed_transaction: rlp_signed_hex,
+            signed_transaction: rlp_signed_hex.clone(),
+            signed_paymaster_transaction: paymaster_rlp_signed_hex.clone(),
             request_tokens_for_gas,
         }
         .emit();
 
-        // Currently, this is returning the transaction ID (transaction hash),
-        // since that is what the `eth_sendTransaction` RPC call does. However,
-        // it is potentially more useful to return the signed payload. Until it
-        // is determined that this is actually necessary, though, we are going
-        // to stick close to the ETH RPC convention.
-        hex::encode(transaction.hash(&signature))
+        TransactionDetails {
+            signed_transaction: rlp_signed_hex,
+            signed_paymaster_transaction: paymaster_rlp_signed_hex,
+        }
     }
 }
 
