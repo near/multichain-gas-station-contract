@@ -1,5 +1,7 @@
 use ethers::{
-    types::{transaction::eip2718::TypedTransaction, NameOrAddress, TransactionRequest, U256},
+    types::{
+        transaction::eip2718::TypedTransaction, NameOrAddress, TransactionRequest, H160, U256,
+    },
     utils::rlp::{Decodable, Rlp},
 };
 use near_sdk::{
@@ -8,16 +10,19 @@ use near_sdk::{
     json_types::U64,
     near_bindgen, require,
     serde::{Deserialize, Serialize},
-    store::UnorderedSet,
+    store::{UnorderedMap, UnorderedSet},
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError,
 };
 use near_sdk_contract_tools::{event, owner::*, standard::nep297::Event, Owner};
 
 mod oracle;
+use oracle::{ext_oracle, AssetOptionalPrice, PriceData};
 
 mod signer_contract;
-use oracle::{ext_oracle, AssetOptionalPrice, PriceData};
 use signer_contract::{ext_signer, MpcSignature};
+
+mod signature_request;
+use signature_request::{SignatureRequest, SignatureRequestStatus};
 
 mod utils;
 use utils::*;
@@ -33,22 +38,22 @@ type XChainTokenAmount = ethers::types::U256;
 ///
 /// IDs are arbitrarily chosen by the contract. An ID is guaranteed to be unique
 /// within the contract.
-#[event(version = "0.1.0", standard = "x-multichain-sig")]
-pub enum ContractEvent {
-    RequestTransactionSignature {
-        xchain_id: String,
-        sender_address: Option<XChainAddress>,
-        unsigned_transaction: String,
-        request_tokens_for_gas: Option<XChainTokenAmount>,
-    },
-    FinalizeTransactionSignature {
-        xchain_id: String,
-        sender_address: Option<XChainAddress>,
-        signed_transaction: String,
-        signed_paymaster_transaction: String,
-        request_tokens_for_gas: Option<XChainTokenAmount>,
-    },
-}
+// #[event(version = "0.1.0", standard = "x-multichain-sig")]
+// pub enum ContractEvent {
+//     RequestTransactionSignature {
+//         xchain_id: String,
+//         sender_address: Option<XChainAddress>,
+//         unsigned_transaction: String,
+//         request_tokens_for_gas: Option<XChainTokenAmount>,
+//     },
+//     FinalizeTransactionSignature {
+//         xchain_id: String,
+//         sender_address: Option<XChainAddress>,
+//         signed_transaction: String,
+//         signed_paymaster_transaction: String,
+//         request_tokens_for_gas: Option<XChainTokenAmount>,
+//     },
+// }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
@@ -70,62 +75,83 @@ pub struct GasTokenPrice {
     pub updated_at_block_height: u64,
 }
 
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct TransactionInitiation {
+    id: U64,
+    pending_signature_count: u32,
+}
+
 #[derive(BorshSerialize, BorshDeserialize, BorshStorageKey, Hash, Clone, Debug, PartialEq, Eq)]
 pub enum StorageKey {
     SenderWhitelist,
     ReceiverWhitelist,
+    SupportedForeignChainIds,
+    PendingTransactions,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Owner)]
 #[near_bindgen]
 pub struct Contract {
-    /// Identifies the target chain to the off-chain relayer.
-    /// For example, "ETH", "zkSync", etc.
-    pub foreign_chain: String,
-    /// The identifier that the foreign chain uses to identify itself.
-    /// For example, 1 for ETH mainnet, 97 for BSC mainnet...
-    pub foreign_internal_chain_id: U64,
+    pub next_unique_id: u64,
     pub signer_contract_id: AccountId,
     pub oracle_id: AccountId,
     pub oracle_local_asset_id: String,
     pub oracle_xchain_asset_id: String,
+    pub supported_foreign_chain_ids: UnorderedSet<u64>,
     pub sender_whitelist: UnorderedSet<XChainAddress>,
     pub receiver_whitelist: UnorderedSet<XChainAddress>,
     pub flags: Flags,
-    pub gas_token_price: Option<GasTokenPrice>,
     pub price_scale: (u128, u128),
+    pub pending_transactions: UnorderedMap<u64, Vec<SignatureRequest>>,
+}
+
+fn transaction_fee(
+    conversion_rate: (u128, u128),
+    price_scale: (u128, u128),
+    request_tokens_for_gas: XChainTokenAmount,
+) -> u128 {
+    // calculate fee based on currently known price, and include scaling factor
+    // TODO: Check price data freshness
+    let a = request_tokens_for_gas * U256::from(conversion_rate.0) * U256::from(price_scale.0);
+    let (b, rem) = a.div_mod(U256::from(conversion_rate.1) * U256::from(price_scale.1));
+    // round up
+    if rem.is_zero() { b } else { b + 1 }.as_u128()
 }
 
 #[near_bindgen]
 impl Contract {
     #[init]
     pub fn new(
-        foreign_chain: String,
-        foreign_internal_chain_id: U64,
         signer_contract_id: AccountId,
         oracle_id: AccountId,
         oracle_local_asset_id: String,
         oracle_xchain_asset_id: String,
     ) -> Self {
         let mut contract = Self {
-            foreign_chain,
-            foreign_internal_chain_id,
+            next_unique_id: 0,
             signer_contract_id,
             oracle_id,
             oracle_local_asset_id,
             oracle_xchain_asset_id,
+            supported_foreign_chain_ids: UnorderedSet::new(StorageKey::SupportedForeignChainIds), // TODO: Implement
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
             flags: Flags::default(),
-            gas_token_price: None,
             price_scale: (120, 100), // +20% on top of market price
+            pending_transactions: UnorderedMap::new(StorageKey::PendingTransactions),
         };
 
         Owner::init(&mut contract, &env::predecessor_account_id());
 
-        contract.fetch_oracle(); // update oracle immediately
-
         contract
+    }
+
+    fn generate_unique_id(&mut self) -> u64 {
+        let id = self.next_unique_id;
+        self.next_unique_id = self.next_unique_id.checked_add(1).unwrap_or_else(|| {
+            env::panic_str("Failed to generate unique ID");
+        });
+        id
     }
 
     // Public contract config getters/setters
@@ -185,19 +211,14 @@ impl Contract {
         self.sender_whitelist.clear();
     }
 
-    pub fn fetch_oracle(&mut self) -> Promise {
-        // TODO: Does this method need access control or assert_one_yocto?
+    fn fetch_oracle(&mut self) -> Promise {
         ext_oracle::ext(self.oracle_id.clone()).get_price_data(Some(vec![
             self.oracle_local_asset_id.clone(),
             self.oracle_xchain_asset_id.clone(),
         ]))
     }
 
-    #[private]
-    pub fn fetch_oracle_callback(
-        &mut self,
-        #[callback_result] result: Result<PriceData, PromiseError>,
-    ) {
+    fn process_oracle_result(&self, result: Result<PriceData, PromiseError>) -> GasTokenPrice {
         let price_data = result.unwrap_or_else(|_| env::panic_str("Failed to fetch price data"));
 
         let (local_price, xchain_price) = match &price_data.prices[..] {
@@ -215,27 +236,16 @@ impl Contract {
             _ => env::panic_str("Invalid price data"),
         };
 
-        self.gas_token_price = Some(GasTokenPrice {
+        GasTokenPrice {
             local_per_xchain: (
                 xchain_price.multiplier.0 * u128::from(local_price.decimals),
                 local_price.multiplier.0 * u128::from(xchain_price.decimals),
             ),
             updated_at_block_height: env::block_height(),
-        });
+        }
     }
 
     // Private helper methods
-
-    fn price_of_gas(&self, request_tokens_for_gas: XChainTokenAmount) -> Option<u128> {
-        // calculate fee based on currently known price, and include scaling factor
-        // TODO: Check price data freshness
-        let conversion_rate = self.gas_token_price.as_ref()?.local_per_xchain;
-        let a =
-            request_tokens_for_gas * U256::from(conversion_rate.0) * U256::from(self.price_scale.0);
-        let (b, rem) = a.div_mod(U256::from(conversion_rate.1) * U256::from(self.price_scale.1));
-        // round up
-        Some(if rem.is_zero() { b } else { b + 1 }.as_u128())
-    }
 
     fn validate_transaction(&self, transaction: &TypedTransaction) {
         require!(
@@ -243,12 +253,10 @@ impl Contract {
             "Gas must be explicitly specified",
         );
 
-        if let Some(chain_id) = transaction.chain_id() {
-            require!(
-                chain_id.as_u64() == self.foreign_internal_chain_id.0,
-                "Chain ID mismatch"
-            );
-        }
+        require!(
+            transaction.chain_id().is_some(),
+            "Chain ID must be explicitly specified",
+        );
 
         // Validate receiver
         let receiver: Option<XChainAddress> = match transaction.to() {
@@ -287,29 +295,47 @@ impl Contract {
         }
     }
 
-    fn request_signature(&mut self, key_path: String, transaction: &TypedTransaction) -> Promise {
-        ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
-            .sign(transaction.sighash().0, key_path)
-    }
-
     // Public methods
 
     #[payable]
-    pub fn xchain_sign(
+    pub fn initiate_transaction(
         &mut self,
         transaction_json: Option<TypedTransaction>,
         transaction_rlp: Option<String>,
     ) -> Promise {
-        let mut transaction = extract_transaction(transaction_json, transaction_rlp);
+        let deposit = env::attached_deposit();
+        require!(deposit > 0, "Deposit is required to pay for gas");
+
+        let transaction = extract_transaction(transaction_json, transaction_rlp);
 
         self.validate_transaction(&transaction);
-        transaction.set_chain_id(self.foreign_internal_chain_id.0);
 
+        self.fetch_oracle().then(
+            Self::ext(env::current_account_id()).initiate_transaction_callback(
+                env::predecessor_account_id(),
+                deposit.into(),
+                transaction,
+            ),
+        )
+    }
+
+    #[private]
+    pub fn initiate_transaction_callback(
+        &mut self,
+        predecessor: AccountId,
+        deposit: near_sdk::json_types::U128,
+        transaction: TypedTransaction,
+        #[callback_result] result: Result<PriceData, PromiseError>,
+    ) -> TransactionInitiation {
+        let gas_token_price = self.process_oracle_result(result);
         let request_tokens_for_gas = tokens_for_gas(&transaction).unwrap(); // Validation ensures gas is set.
-        let fee = self
-            .price_of_gas(request_tokens_for_gas)
-            .unwrap_or_else(|| env::panic_str("No gas price available"));
-        let deposit = env::attached_deposit();
+        let fee = transaction_fee(
+            gas_token_price.local_per_xchain,
+            self.price_scale,
+            request_tokens_for_gas,
+        );
+        // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
+        let deposit = deposit.0;
 
         match deposit.checked_sub(fee) {
             None => {
@@ -320,20 +346,12 @@ impl Contract {
             Some(0) => {} // No refund; payment is exact.
             Some(refund) => {
                 // Refund excess
-                Promise::new(env::predecessor_account_id()).transfer(refund);
+                Promise::new(predecessor.clone()).transfer(refund);
             }
         }
 
-        ContractEvent::RequestTransactionSignature {
-            xchain_id: self.foreign_chain.clone(),
-            sender_address: transaction.from().map(Into::into),
-            unsigned_transaction: hex::encode(&transaction.rlp()),
-            request_tokens_for_gas: Some(request_tokens_for_gas),
-        }
-        .emit();
-
         let paymaster_transaction: TypedTransaction = TransactionRequest {
-            chain_id: Some(self.foreign_internal_chain_id.0.into()),
+            chain_id: Some(transaction.chain_id().unwrap()),
             from: None, // TODO: PK gen
             to: Some((*transaction.from().unwrap()).into()),
             value: Some(request_tokens_for_gas),
@@ -341,55 +359,90 @@ impl Contract {
         }
         .into();
 
-        self.request_signature("$".to_string(), &paymaster_transaction)
-            .and(self.request_signature(env::predecessor_account_id().to_string(), &transaction))
-            .then(
-                Self::ext(env::current_account_id())
-                    .request_signature_callback(paymaster_transaction, transaction),
-            )
+        let transactions = vec![
+            SignatureRequest::new("$", paymaster_transaction),
+            SignatureRequest::new(env::predecessor_account_id(), transaction),
+        ];
+
+        let pending_signature_count = transactions.len() as u32;
+
+        let id = self.generate_unique_id();
+
+        self.pending_transactions.insert(id, transactions);
+
+        TransactionInitiation {
+            id: id.into(),
+            pending_signature_count,
+        }
+    }
+
+    pub fn sign_next(&mut self, id: U64) -> Promise {
+        let id = id.0;
+
+        let (index, next_signature_request, key_path) = self
+            .pending_transactions
+            .get_mut(&id)
+            .unwrap_or_else(|| {
+                env::panic_str(&format!("Transaction signature request {id} not found"))
+            })
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, r)| match r.status {
+                SignatureRequestStatus::Pending {
+                    ref mut in_flight,
+                    ref key_path,
+                } if !*in_flight => {
+                    *in_flight = true;
+                    Some((i as u32, &r.transaction, key_path))
+                }
+                _ => None,
+            })
+            .next()
+            .unwrap_or_else(|| env::panic_str("No pending or non-in-flight signature requests"));
+
+        ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
+            .sign(next_signature_request.0.sighash().0, key_path)
+            .then(Self::ext(env::current_account_id()).sign_next_callback(id.into(), index))
     }
 
     #[private]
-    pub fn request_signature_callback(
+    pub fn sign_next_callback(
         &mut self,
-        paymaster_transaction: TypedTransaction,
-        transaction: TypedTransaction,
-        #[callback_result] paymaster_result: Result<MpcSignature, PromiseError>,
+        id: U64,
+        index: u32,
         #[callback_result] result: Result<MpcSignature, PromiseError>,
-    ) -> TransactionDetails {
-        fn unwrap_signature(
-            result: Result<MpcSignature, PromiseError>,
-        ) -> ethers::types::Signature {
-            result
-                .unwrap_or_else(|e| env::panic_str(&format!("Failed to produce signature: {e:?}")))
-                .try_into()
-                .unwrap_or_else(|e| env::panic_str(&format!("Failed to decode signature: {e:?}")))
+    ) -> String {
+        let id = id.0;
+
+        let request = self
+            .pending_transactions
+            .get_mut(&id)
+            .unwrap_or_else(|| env::panic_str(&format!("Pending transaction {id} not found")))
+            .get_mut(index as usize)
+            .unwrap_or_else(|| {
+                env::panic_str(&format!(
+                    "Signature request {id}.{index} not found in transaction",
+                ))
+            });
+
+        if !request.is_pending() {
+            env::panic_str(&format!(
+                "Signature request {id}.{index} has already been signed"
+            ));
         }
 
-        let signature = unwrap_signature(result);
-        let paymaster_signature = unwrap_signature(paymaster_result);
+        let signature = result
+            .unwrap_or_else(|e| env::panic_str(&format!("Failed to produce signature: {e:?}")))
+            .try_into()
+            .unwrap_or_else(|e| env::panic_str(&format!("Failed to decode signature: {e:?}")));
+
+        let transaction = &request.transaction.0;
 
         let rlp_signed = transaction.rlp_signed(&signature);
-        let rlp_signed_hex = hex::encode(&rlp_signed);
 
-        let request_tokens_for_gas = tokens_for_gas(&transaction);
+        request.set_signature(signature);
 
-        let paymaster_rlp_signed = paymaster_transaction.rlp_signed(&paymaster_signature);
-        let paymaster_rlp_signed_hex = hex::encode(&paymaster_rlp_signed);
-
-        ContractEvent::FinalizeTransactionSignature {
-            xchain_id: self.foreign_chain.clone(),
-            sender_address: transaction.from().map(Into::into),
-            signed_transaction: rlp_signed_hex.clone(),
-            signed_paymaster_transaction: paymaster_rlp_signed_hex.clone(),
-            request_tokens_for_gas,
-        }
-        .emit();
-
-        TransactionDetails {
-            signed_transaction: rlp_signed_hex,
-            signed_paymaster_transaction: paymaster_rlp_signed_hex,
-        }
+        hex::encode(&rlp_signed)
     }
 }
 

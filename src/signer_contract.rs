@@ -33,7 +33,7 @@ pub enum ProtocolContractState {
 
 #[ext_contract(ext_signer)]
 pub trait SignerContract {
-    fn sign(&mut self, payload: [u8; 32], path: String) -> Promise;
+    fn sign(&mut self, payload: [u8; 32], path: &str) -> Promise;
     fn state(&self) -> ProtocolContractState;
 }
 
