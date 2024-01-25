@@ -14,7 +14,6 @@ use near_sdk::{
     into = "TypedTransaction"
 )]
 pub struct TypedTransactionBorsh(pub TypedTransaction);
-// borsh_via_rlp!(TypedTransactionBorsh, TypedTransaction);
 
 impl From<TypedTransaction> for TypedTransactionBorsh {
     fn from(transaction: TypedTransaction) -> Self {

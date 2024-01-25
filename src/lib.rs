@@ -1,3 +1,5 @@
+use std::future::Pending;
+
 use ethers::{
     types::{
         transaction::eip2718::TypedTransaction, NameOrAddress, TransactionRequest, H160, U256,
@@ -104,6 +106,19 @@ pub struct GetForeignChain {
     oracle_asset_id: String,
 }
 
+#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct PendingTransaction {
+    sender_id: AccountId,
+    signature_requests: Vec<SignatureRequest>,
+}
+
+impl PendingTransaction {
+    pub fn all_signed(&self) -> bool {
+        self.signature_requests.iter().all(|r| r.is_signed())
+    }
+}
+
 #[derive(BorshSerialize, BorshDeserialize, BorshStorageKey, Hash, Clone, Debug, PartialEq, Eq)]
 pub enum StorageKey {
     SenderWhitelist,
@@ -125,7 +140,7 @@ pub struct Contract {
     pub receiver_whitelist: UnorderedSet<ForeignAddress>,
     pub flags: Flags,
     pub price_scale: (u128, u128),
-    pub pending_transactions: UnorderedMap<u64, Vec<SignatureRequest>>, // TODO: Getter for pending transactions
+    pub pending_transactions: UnorderedMap<u64, PendingTransaction>,
 }
 
 fn transaction_fee(
@@ -153,7 +168,7 @@ impl Contract {
             signer_contract_id,
             oracle_id,
             oracle_local_asset_id,
-            foreign_chains: UnorderedMap::new(StorageKey::ForeignChains), // TODO: Implement
+            foreign_chains: UnorderedMap::new(StorageKey::ForeignChains),
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
             flags: Flags::default(),
@@ -301,6 +316,10 @@ impl Contract {
             .collect()
     }
 
+    pub fn get_transaction(&self, id: U64) -> Option<&PendingTransaction> {
+        self.pending_transactions.get(&id.0)
+    }
+
     // Private helper methods
 
     fn generate_unique_id(&mut self) -> u64 {
@@ -361,13 +380,13 @@ impl Contract {
 
     fn insert_pending_transaction(
         &mut self,
-        signature_requests: Vec<SignatureRequest>,
+        pending_transaction: PendingTransaction,
     ) -> TransactionInitiation {
-        let pending_signature_count = signature_requests.len() as u32;
+        let pending_signature_count = pending_transaction.signature_requests.len() as u32;
 
         let id = self.generate_unique_id();
 
-        self.pending_transactions.insert(id, signature_requests);
+        self.pending_transactions.insert(id, pending_transaction);
 
         TransactionInitiation {
             id: id.into(),
@@ -417,10 +436,12 @@ impl Contract {
                 )
                 .into()
         } else {
-            PromiseOrValue::Value(self.insert_pending_transaction(vec![SignatureRequest::new(
-                env::predecessor_account_id(),
-                transaction,
-            )]))
+            let predecessor = env::predecessor_account_id();
+
+            PromiseOrValue::Value(self.insert_pending_transaction(PendingTransaction {
+                signature_requests: vec![SignatureRequest::new(predecessor.clone(), transaction)],
+                sender_id: predecessor,
+            }))
         }
     }
 
@@ -471,7 +492,7 @@ impl Contract {
 
         let paymaster_transaction: TypedTransaction = TransactionRequest {
             chain_id: Some(transaction.chain_id().unwrap()),
-            from: Some(paymaster.foreign_address.into()), // TODO: PK gen
+            from: Some(paymaster.foreign_address.into()),
             to: Some((*transaction.from().unwrap()).into()),
             value: Some(request_tokens_for_gas),
             ..Default::default()
@@ -480,10 +501,13 @@ impl Contract {
 
         let signature_requests = vec![
             SignatureRequest::new(&paymaster.key_path, paymaster_transaction),
-            SignatureRequest::new(predecessor, transaction),
+            SignatureRequest::new(predecessor.clone(), transaction),
         ];
 
-        self.insert_pending_transaction(signature_requests)
+        self.insert_pending_transaction(PendingTransaction {
+            signature_requests,
+            sender_id: predecessor,
+        })
     }
 
     pub fn sign_next(&mut self, id: U64) -> Promise {
@@ -495,6 +519,7 @@ impl Contract {
             .unwrap_or_else(|| {
                 env::panic_str(&format!("Transaction signature request {id} not found"))
             })
+            .signature_requests
             .iter_mut()
             .enumerate()
             .filter_map(|(i, r)| match r.status {
@@ -524,16 +549,19 @@ impl Contract {
     ) -> String {
         let id = id.0;
 
-        let requests = self
+        let pending_transaction = self
             .pending_transactions
             .get_mut(&id)
             .unwrap_or_else(|| env::panic_str(&format!("Pending transaction {id} not found")));
 
-        let request = requests.get_mut(index as usize).unwrap_or_else(|| {
-            env::panic_str(&format!(
-                "Signature request {id}.{index} not found in transaction",
-            ))
-        });
+        let request = pending_transaction
+            .signature_requests
+            .get_mut(index as usize)
+            .unwrap_or_else(|| {
+                env::panic_str(&format!(
+                    "Signature request {id}.{index} not found in transaction",
+                ))
+            });
 
         if !request.is_pending() {
             env::panic_str(&format!(
@@ -553,7 +581,7 @@ impl Contract {
         request.set_signature(signature);
 
         // Remove transaction if all requests have been signed
-        if requests.iter().all(|r| r.is_signed()) {
+        if pending_transaction.all_signed() {
             self.pending_transactions.remove(&id);
         }
 
