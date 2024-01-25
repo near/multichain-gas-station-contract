@@ -10,13 +10,13 @@ use near_sdk::{
     json_types::U64,
     near_bindgen, require,
     serde::{Deserialize, Serialize},
-    store::{UnorderedMap, UnorderedSet},
-    AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError,
+    store::{UnorderedMap, UnorderedSet, Vector},
+    AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
 use near_sdk_contract_tools::{event, owner::*, standard::nep297::Event, Owner};
 
 mod oracle;
-use oracle::{ext_oracle, process_oracle_result, AssetOptionalPrice, PriceData};
+use oracle::{ext_oracle, process_oracle_result, PriceData};
 
 mod signer_contract;
 use signer_contract::{ext_signer, MpcSignature};
@@ -75,11 +75,41 @@ pub struct TransactionInitiation {
     pending_signature_count: u32,
 }
 
+#[derive(Serialize, BorshSerialize, BorshDeserialize, Clone, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct PaymasterConfiguration {
+    foreign_address: ForeignAddress,
+    key_path: String,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug)]
+pub struct ForeignChainConfiguration {
+    paymasters: Vector<PaymasterConfiguration>,
+    next_paymaster: u32,
+    oracle_asset_id: String,
+}
+
+impl ForeignChainConfiguration {
+    pub fn next_paymaster(&mut self) -> Option<&PaymasterConfiguration> {
+        let paymaster = self.paymasters.get(self.next_paymaster);
+        self.next_paymaster = (self.next_paymaster + 1) % self.paymasters.len();
+        paymaster
+    }
+}
+
+#[derive(Serialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct GetForeignChain {
+    chain_id: U64,
+    oracle_asset_id: String,
+}
+
 #[derive(BorshSerialize, BorshDeserialize, BorshStorageKey, Hash, Clone, Debug, PartialEq, Eq)]
 pub enum StorageKey {
     SenderWhitelist,
     ReceiverWhitelist,
-    SupportedForeignChainIds,
+    ForeignChains,
+    Paymasters(u64),
     PendingTransactions,
 }
 
@@ -90,8 +120,7 @@ pub struct Contract {
     pub signer_contract_id: AccountId,
     pub oracle_id: AccountId,
     pub oracle_local_asset_id: String,
-    pub oracle_foreign_asset_id: String,
-    pub supported_foreign_chain_ids: UnorderedSet<u64>,
+    pub foreign_chains: UnorderedMap<u64, ForeignChainConfiguration>,
     pub sender_whitelist: UnorderedSet<ForeignAddress>,
     pub receiver_whitelist: UnorderedSet<ForeignAddress>,
     pub flags: Flags,
@@ -118,33 +147,23 @@ impl Contract {
         signer_contract_id: AccountId,
         oracle_id: AccountId,
         oracle_local_asset_id: String,
-        oracle_foreign_asset_id: String,
     ) -> Self {
         let mut contract = Self {
             next_unique_id: 0,
             signer_contract_id,
             oracle_id,
             oracle_local_asset_id,
-            oracle_foreign_asset_id,
-            supported_foreign_chain_ids: UnorderedSet::new(StorageKey::SupportedForeignChainIds), // TODO: Implement
+            foreign_chains: UnorderedMap::new(StorageKey::ForeignChains), // TODO: Implement
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
             flags: Flags::default(),
-            price_scale: (120, 100), // +20% on top of market price
+            price_scale: (120, 100), // +20% on top of oracle price
             pending_transactions: UnorderedMap::new(StorageKey::PendingTransactions),
         };
 
         Owner::init(&mut contract, &env::predecessor_account_id());
 
         contract
-    }
-
-    fn generate_unique_id(&mut self) -> u64 {
-        let id = self.next_unique_id;
-        self.next_unique_id = self.next_unique_id.checked_add(1).unwrap_or_else(|| {
-            env::panic_str("Failed to generate unique ID");
-        });
-        id
     }
 
     // Public contract config getters/setters
@@ -204,14 +223,93 @@ impl Contract {
         self.sender_whitelist.clear();
     }
 
-    fn fetch_oracle(&mut self) -> Promise {
-        ext_oracle::ext(self.oracle_id.clone()).get_price_data(Some(vec![
-            self.oracle_local_asset_id.clone(),
-            self.oracle_foreign_asset_id.clone(),
-        ]))
+    pub fn configure_foreign_chain(&mut self, chain_id: U64, oracle_asset_id: String) {
+        self.assert_owner();
+        let config =
+            self.foreign_chains
+                .entry(chain_id.0)
+                .or_insert_with(|| ForeignChainConfiguration {
+                    next_paymaster: 0,
+                    oracle_asset_id: String::new(),
+                    paymasters: Vector::new(StorageKey::Paymasters(chain_id.0)),
+                });
+
+        config.oracle_asset_id = oracle_asset_id;
+    }
+
+    pub fn remove_foreign_chain(&mut self, chain_id: U64) {
+        self.assert_owner();
+        if let Some((_, mut config)) = self.foreign_chains.remove_entry(&chain_id.0) {
+            config.paymasters.clear();
+        }
+    }
+
+    pub fn get_foreign_chains(&self) -> Vec<GetForeignChain> {
+        self.foreign_chains
+            .iter()
+            .map(|(chain_id, config)| GetForeignChain {
+                chain_id: (*chain_id).into(),
+                oracle_asset_id: config.oracle_asset_id.clone(),
+            })
+            .collect()
+    }
+
+    pub fn add_paymaster(
+        &mut self,
+        chain_id: U64,
+        foreign_address: ForeignAddress,
+        key_path: String,
+    ) -> u32 {
+        self.assert_owner();
+        let chain = self
+            .foreign_chains
+            .get_mut(&chain_id.0)
+            .unwrap_or_else(|| env::panic_str("Foreign chain does not exist"));
+
+        let index = chain.paymasters.len();
+
+        chain.paymasters.push(PaymasterConfiguration {
+            foreign_address,
+            key_path,
+        });
+
+        index
+    }
+
+    pub fn remove_paymaster(&mut self, chain_id: U64, index: u32) {
+        self.assert_owner();
+        let chain = self
+            .foreign_chains
+            .get_mut(&chain_id.0)
+            .unwrap_or_else(|| env::panic_str("Foreign chain does not exist"));
+
+        if index < chain.paymasters.len() {
+            chain.paymasters.swap_remove(index);
+            chain.next_paymaster %= chain.paymasters.len();
+        } else {
+            env::panic_str("Invalid index");
+        }
+    }
+
+    pub fn get_paymasters(&self, chain_id: U64) -> Vec<PaymasterConfiguration> {
+        self.foreign_chains
+            .get(&chain_id.0)
+            .unwrap_or_else(|| env::panic_str("Foreign chain does not exist"))
+            .paymasters
+            .iter()
+            .cloned()
+            .collect()
     }
 
     // Private helper methods
+
+    fn generate_unique_id(&mut self) -> u64 {
+        let id = self.next_unique_id;
+        self.next_unique_id = self.next_unique_id.checked_add(1).unwrap_or_else(|| {
+            env::panic_str("Failed to generate unique ID");
+        });
+        id
+    }
 
     fn validate_transaction(&self, transaction: &TypedTransaction) {
         require!(
@@ -261,6 +359,22 @@ impl Contract {
         }
     }
 
+    fn insert_pending_transaction(
+        &mut self,
+        signature_requests: Vec<SignatureRequest>,
+    ) -> TransactionInitiation {
+        let pending_signature_count = signature_requests.len() as u32;
+
+        let id = self.generate_unique_id();
+
+        self.pending_transactions.insert(id, signature_requests);
+
+        TransactionInitiation {
+            id: id.into(),
+            pending_signature_count,
+        }
+    }
+
     // Public methods
 
     #[payable]
@@ -268,7 +382,8 @@ impl Contract {
         &mut self,
         transaction_json: Option<TypedTransaction>,
         transaction_rlp: Option<String>,
-    ) -> Promise {
+        use_paymaster: Option<bool>,
+    ) -> PromiseOrValue<TransactionInitiation> {
         let deposit = env::attached_deposit();
         require!(deposit > 0, "Deposit is required to pay for gas");
 
@@ -277,13 +392,36 @@ impl Contract {
         // Guarantees invariants required in callback
         self.validate_transaction(&transaction);
 
-        self.fetch_oracle().then(
-            Self::ext(env::current_account_id()).initiate_transaction_callback(
+        let use_paymaster = use_paymaster.unwrap_or(false);
+
+        if use_paymaster {
+            let chain_id = transaction.chain_id().unwrap();
+            let foreign_chain_configuration = self
+                .foreign_chains
+                .get(&chain_id.as_u64())
+                .unwrap_or_else(|| {
+                    env::panic_str(&format!("Paymaster not supported for chain id {chain_id}"))
+                });
+
+            ext_oracle::ext(self.oracle_id.clone())
+                .get_price_data(Some(vec![
+                    self.oracle_local_asset_id.clone(),
+                    foreign_chain_configuration.oracle_asset_id.clone(),
+                ]))
+                .then(
+                    Self::ext(env::current_account_id()).initiate_transaction_callback(
+                        env::predecessor_account_id(),
+                        deposit.into(),
+                        transaction,
+                    ),
+                )
+                .into()
+        } else {
+            PromiseOrValue::Value(self.insert_pending_transaction(vec![SignatureRequest::new(
                 env::predecessor_account_id(),
-                deposit.into(),
                 transaction,
-            ),
-        )
+            )]))
+        }
     }
 
     #[private]
@@ -294,9 +432,19 @@ impl Contract {
         transaction: TypedTransaction,
         #[callback_result] result: Result<PriceData, PromiseError>,
     ) -> TransactionInitiation {
+        let foreign_chain_configuration = self
+            .foreign_chains
+            .get_mut(&transaction.chain_id().unwrap().as_u64())
+            .unwrap_or_else(|| {
+                env::panic_str(&format!(
+                    "Paymaster not supported for chain id {}",
+                    transaction.chain_id().unwrap()
+                ))
+            });
+
         let gas_token_price = process_oracle_result(
             &self.oracle_local_asset_id,
-            &self.oracle_foreign_asset_id,
+            &foreign_chain_configuration.oracle_asset_id,
             result,
         );
         let request_tokens_for_gas = tokens_for_gas(&transaction).unwrap(); // Validation ensures gas is set.
@@ -317,30 +465,25 @@ impl Contract {
             }
         }
 
+        let paymaster = foreign_chain_configuration
+            .next_paymaster()
+            .unwrap_or_else(|| env::panic_str("No paymasters found"));
+
         let paymaster_transaction: TypedTransaction = TransactionRequest {
             chain_id: Some(transaction.chain_id().unwrap()),
-            from: None, // TODO: PK gen
+            from: Some(paymaster.foreign_address.into()), // TODO: PK gen
             to: Some((*transaction.from().unwrap()).into()),
             value: Some(request_tokens_for_gas),
             ..Default::default()
         }
         .into();
 
-        let transactions = vec![
-            SignatureRequest::new("$", paymaster_transaction),
-            SignatureRequest::new(env::predecessor_account_id(), transaction),
+        let signature_requests = vec![
+            SignatureRequest::new(&paymaster.key_path, paymaster_transaction),
+            SignatureRequest::new(predecessor, transaction),
         ];
 
-        let pending_signature_count = transactions.len() as u32;
-
-        let id = self.generate_unique_id();
-
-        self.pending_transactions.insert(id, transactions);
-
-        TransactionInitiation {
-            id: id.into(),
-            pending_signature_count,
-        }
+        self.insert_pending_transaction(signature_requests)
     }
 
     pub fn sign_next(&mut self, id: U64) -> Promise {
