@@ -16,7 +16,7 @@ use near_sdk::{
 use near_sdk_contract_tools::{event, owner::*, standard::nep297::Event, Owner};
 
 mod oracle;
-use oracle::{ext_oracle, AssetOptionalPrice, PriceData};
+use oracle::{ext_oracle, process_oracle_result, AssetOptionalPrice, PriceData};
 
 mod signer_contract;
 use signer_contract::{ext_signer, MpcSignature};
@@ -27,8 +27,8 @@ use signature_request::{SignatureRequest, SignatureRequestStatus};
 mod utils;
 use utils::*;
 
-mod xchain_address;
-use xchain_address::XChainAddress;
+mod foreign_address;
+use foreign_address::ForeignAddress;
 
 type XChainTokenAmount = ethers::types::U256;
 
@@ -70,12 +70,6 @@ pub struct Flags {
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
-pub struct GasTokenPrice {
-    pub local_per_xchain: (u128, u128),
-    pub updated_at_block_height: u64,
-}
-
-#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct TransactionInitiation {
     id: U64,
     pending_signature_count: u32,
@@ -96,13 +90,13 @@ pub struct Contract {
     pub signer_contract_id: AccountId,
     pub oracle_id: AccountId,
     pub oracle_local_asset_id: String,
-    pub oracle_xchain_asset_id: String,
+    pub oracle_foreign_asset_id: String,
     pub supported_foreign_chain_ids: UnorderedSet<u64>,
-    pub sender_whitelist: UnorderedSet<XChainAddress>,
-    pub receiver_whitelist: UnorderedSet<XChainAddress>,
+    pub sender_whitelist: UnorderedSet<ForeignAddress>,
+    pub receiver_whitelist: UnorderedSet<ForeignAddress>,
     pub flags: Flags,
     pub price_scale: (u128, u128),
-    pub pending_transactions: UnorderedMap<u64, Vec<SignatureRequest>>,
+    pub pending_transactions: UnorderedMap<u64, Vec<SignatureRequest>>, // TODO: Getter for pending transactions
 }
 
 fn transaction_fee(
@@ -111,7 +105,6 @@ fn transaction_fee(
     request_tokens_for_gas: XChainTokenAmount,
 ) -> u128 {
     // calculate fee based on currently known price, and include scaling factor
-    // TODO: Check price data freshness
     let a = request_tokens_for_gas * U256::from(conversion_rate.0) * U256::from(price_scale.0);
     let (b, rem) = a.div_mod(U256::from(conversion_rate.1) * U256::from(price_scale.1));
     // round up
@@ -125,14 +118,14 @@ impl Contract {
         signer_contract_id: AccountId,
         oracle_id: AccountId,
         oracle_local_asset_id: String,
-        oracle_xchain_asset_id: String,
+        oracle_foreign_asset_id: String,
     ) -> Self {
         let mut contract = Self {
             next_unique_id: 0,
             signer_contract_id,
             oracle_id,
             oracle_local_asset_id,
-            oracle_xchain_asset_id,
+            oracle_foreign_asset_id,
             supported_foreign_chain_ids: UnorderedSet::new(StorageKey::SupportedForeignChainIds), // TODO: Implement
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
@@ -165,18 +158,18 @@ impl Contract {
         self.flags = flags;
     }
 
-    pub fn get_receiver_whitelist(&self) -> Vec<&XChainAddress> {
+    pub fn get_receiver_whitelist(&self) -> Vec<&ForeignAddress> {
         self.receiver_whitelist.iter().collect()
     }
 
-    pub fn add_to_receiver_whitelist(&mut self, addresses: Vec<XChainAddress>) {
+    pub fn add_to_receiver_whitelist(&mut self, addresses: Vec<ForeignAddress>) {
         self.assert_owner();
         for address in addresses {
             self.receiver_whitelist.insert(address);
         }
     }
 
-    pub fn remove_from_receiver_whitelist(&mut self, addresses: Vec<XChainAddress>) {
+    pub fn remove_from_receiver_whitelist(&mut self, addresses: Vec<ForeignAddress>) {
         self.assert_owner();
         for address in addresses {
             self.receiver_whitelist.remove(&address);
@@ -188,18 +181,18 @@ impl Contract {
         self.receiver_whitelist.clear();
     }
 
-    pub fn get_sender_whitelist(&self) -> Vec<&XChainAddress> {
+    pub fn get_sender_whitelist(&self) -> Vec<&ForeignAddress> {
         self.sender_whitelist.iter().collect()
     }
 
-    pub fn add_to_sender_whitelist(&mut self, addresses: Vec<XChainAddress>) {
+    pub fn add_to_sender_whitelist(&mut self, addresses: Vec<ForeignAddress>) {
         self.assert_owner();
         for address in addresses {
             self.sender_whitelist.insert(address);
         }
     }
 
-    pub fn remove_from_sender_whitelist(&mut self, addresses: Vec<XChainAddress>) {
+    pub fn remove_from_sender_whitelist(&mut self, addresses: Vec<ForeignAddress>) {
         self.assert_owner();
         for address in addresses {
             self.sender_whitelist.remove(&address);
@@ -214,35 +207,8 @@ impl Contract {
     fn fetch_oracle(&mut self) -> Promise {
         ext_oracle::ext(self.oracle_id.clone()).get_price_data(Some(vec![
             self.oracle_local_asset_id.clone(),
-            self.oracle_xchain_asset_id.clone(),
+            self.oracle_foreign_asset_id.clone(),
         ]))
-    }
-
-    fn process_oracle_result(&self, result: Result<PriceData, PromiseError>) -> GasTokenPrice {
-        let price_data = result.unwrap_or_else(|_| env::panic_str("Failed to fetch price data"));
-
-        let (local_price, xchain_price) = match &price_data.prices[..] {
-            [AssetOptionalPrice {
-                asset_id: first_asset_id,
-                price: Some(first_price),
-            }, AssetOptionalPrice {
-                asset_id: second_asset_id,
-                price: Some(second_price),
-            }] if first_asset_id == &self.oracle_local_asset_id
-                && second_asset_id == &self.oracle_xchain_asset_id =>
-            {
-                (first_price, second_price)
-            }
-            _ => env::panic_str("Invalid price data"),
-        };
-
-        GasTokenPrice {
-            local_per_xchain: (
-                xchain_price.multiplier.0 * u128::from(local_price.decimals),
-                local_price.multiplier.0 * u128::from(xchain_price.decimals),
-            ),
-            updated_at_block_height: env::block_height(),
-        }
     }
 
     // Private helper methods
@@ -259,7 +225,7 @@ impl Contract {
         );
 
         // Validate receiver
-        let receiver: Option<XChainAddress> = match transaction.to() {
+        let receiver: Option<ForeignAddress> = match transaction.to() {
             Some(NameOrAddress::Name(_)) => {
                 env::panic_str("ENS names are not supported");
             }
@@ -308,6 +274,7 @@ impl Contract {
 
         let transaction = extract_transaction(transaction_json, transaction_rlp);
 
+        // Guarantees invariants required in callback
         self.validate_transaction(&transaction);
 
         self.fetch_oracle().then(
@@ -327,13 +294,13 @@ impl Contract {
         transaction: TypedTransaction,
         #[callback_result] result: Result<PriceData, PromiseError>,
     ) -> TransactionInitiation {
-        let gas_token_price = self.process_oracle_result(result);
-        let request_tokens_for_gas = tokens_for_gas(&transaction).unwrap(); // Validation ensures gas is set.
-        let fee = transaction_fee(
-            gas_token_price.local_per_xchain,
-            self.price_scale,
-            request_tokens_for_gas,
+        let gas_token_price = process_oracle_result(
+            &self.oracle_local_asset_id,
+            &self.oracle_foreign_asset_id,
+            result,
         );
+        let request_tokens_for_gas = tokens_for_gas(&transaction).unwrap(); // Validation ensures gas is set.
+        let fee = transaction_fee(gas_token_price, self.price_scale, request_tokens_for_gas);
         // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
         let deposit = deposit.0;
 
@@ -414,16 +381,16 @@ impl Contract {
     ) -> String {
         let id = id.0;
 
-        let request = self
+        let requests = self
             .pending_transactions
             .get_mut(&id)
-            .unwrap_or_else(|| env::panic_str(&format!("Pending transaction {id} not found")))
-            .get_mut(index as usize)
-            .unwrap_or_else(|| {
-                env::panic_str(&format!(
-                    "Signature request {id}.{index} not found in transaction",
-                ))
-            });
+            .unwrap_or_else(|| env::panic_str(&format!("Pending transaction {id} not found")));
+
+        let request = requests.get_mut(index as usize).unwrap_or_else(|| {
+            env::panic_str(&format!(
+                "Signature request {id}.{index} not found in transaction",
+            ))
+        });
 
         if !request.is_pending() {
             env::panic_str(&format!(
@@ -441,6 +408,11 @@ impl Contract {
         let rlp_signed = transaction.rlp_signed(&signature);
 
         request.set_signature(signature);
+
+        // Remove transaction if all requests have been signed
+        if requests.iter().all(|r| r.is_signed()) {
+            self.pending_transactions.remove(&id);
+        }
 
         hex::encode(&rlp_signed)
     }
