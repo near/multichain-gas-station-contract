@@ -1,5 +1,3 @@
-use std::future::Pending;
-
 use ethers::{
     types::{
         transaction::eip2718::TypedTransaction, NameOrAddress, TransactionRequest, H160, U256,
@@ -34,6 +32,7 @@ use foreign_address::ForeignAddress;
 
 type XChainTokenAmount = ethers::types::U256;
 
+// TODO: Events
 /// A successful request will emit two events, one for the request and one for
 /// the finalized transaction, in that order. The `id` field will be the same
 /// for both events.
