@@ -1,7 +1,5 @@
 use ethers::{
-    types::{
-        transaction::eip2718::TypedTransaction, NameOrAddress, TransactionRequest, H160, U256,
-    },
+    types::{transaction::eip2718::TypedTransaction, NameOrAddress, TransactionRequest, U256},
     utils::rlp::{Decodable, Rlp},
 };
 use near_sdk::{
@@ -30,7 +28,7 @@ use utils::*;
 mod foreign_address;
 use foreign_address::ForeignAddress;
 
-type XChainTokenAmount = ethers::types::U256;
+type ForeignChainTokenAmount = ethers::types::U256;
 
 // TODO: Events
 /// A successful request will emit two events, one for the request and one for
@@ -70,7 +68,8 @@ pub struct Flags {
     is_receiver_whitelist_enabled: bool,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(crate = "near_sdk::serde")]
 pub struct TransactionInitiation {
     id: U64,
     pending_signature_count: u32,
@@ -80,7 +79,16 @@ pub struct TransactionInitiation {
 #[serde(crate = "near_sdk::serde")]
 pub struct PaymasterConfiguration {
     foreign_address: ForeignAddress,
+    nonce: u32,
     key_path: String,
+}
+
+impl PaymasterConfiguration {
+    pub fn next_nonce(&mut self) -> u32 {
+        let nonce = self.nonce;
+        self.nonce += 1;
+        nonce
+    }
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
@@ -93,9 +101,10 @@ pub struct ForeignChainConfiguration {
 }
 
 impl ForeignChainConfiguration {
-    pub fn next_paymaster(&mut self) -> Option<&PaymasterConfiguration> {
-        let paymaster = self.paymasters.get(self.next_paymaster);
+    pub fn next_paymaster(&mut self) -> Option<&mut PaymasterConfiguration> {
+        let next_paymaster = self.next_paymaster;
         self.next_paymaster = (self.next_paymaster + 1) % self.paymasters.len();
+        let paymaster = self.paymasters.get_mut(next_paymaster);
         paymaster
     }
 
@@ -103,7 +112,7 @@ impl ForeignChainConfiguration {
         &self,
         oracle_local_asset_id: &str,
         price_data: &PriceData,
-        foreign_tokens: XChainTokenAmount,
+        foreign_tokens: ForeignChainTokenAmount,
     ) -> u128 {
         let foreign_token_price =
             process_oracle_result(oracle_local_asset_id, &self.oracle_asset_id, price_data);
@@ -133,7 +142,9 @@ pub struct PendingTransaction {
 
 impl PendingTransaction {
     pub fn all_signed(&self) -> bool {
-        self.signature_requests.iter().all(|r| r.is_signed())
+        self.signature_requests
+            .iter()
+            .all(SignatureRequest::is_signed)
     }
 }
 
@@ -304,6 +315,7 @@ impl Contract {
         &mut self,
         chain_id: U64,
         foreign_address: ForeignAddress,
+        nonce: u32,
         key_path: String,
     ) -> u32 {
         self.assert_owner();
@@ -316,12 +328,30 @@ impl Contract {
 
         chain.paymasters.push(PaymasterConfiguration {
             foreign_address,
+            nonce,
             key_path,
         });
 
         index
     }
 
+    pub fn set_paymaster_nonce(&mut self, chain_id: U64, index: u32, nonce: u32) {
+        self.assert_owner();
+        let chain = self
+            .foreign_chains
+            .get_mut(&chain_id.0)
+            .unwrap_or_else(|| env::panic_str("Foreign chain does not exist"));
+
+        let paymaster = chain.paymasters.get_mut(index).unwrap_or_else(|| {
+            env::panic_str("Invalid index");
+        });
+
+        paymaster.nonce = nonce;
+    }
+
+    /// Note: If a transaction is _already_ pending signatures with the
+    /// paymaster getting removed, this method will not prevent those payloads
+    /// from getting signed.
     pub fn remove_paymaster(&mut self, chain_id: U64, index: u32) {
         self.assert_owner();
         let chain = self
@@ -347,10 +377,19 @@ impl Contract {
             .collect()
     }
 
-    pub fn list_transactions(&self) -> Vec<(U64, &PendingTransaction)> {
-        self.pending_transactions
-            .iter()
-            .map(|(id, tx)| ((*id).into(), tx))
+    pub fn list_transactions(
+        &self,
+        offset: Option<u32>,
+        limit: Option<u32>,
+    ) -> std::collections::HashMap<String, &PendingTransaction> {
+        let mut v: Vec<_> = self.pending_transactions.iter().collect();
+
+        v.sort_by_cached_key(|&(id, _)| *id);
+
+        v.into_iter()
+            .skip(offset.map_or(0, |o| o as usize))
+            .take(limit.map_or(usize::MAX, |l| l as usize))
+            .map(|(id, tx)| (id.to_string(), tx))
             .collect()
     }
 
@@ -503,7 +542,7 @@ impl Contract {
             let predecessor = env::predecessor_account_id();
 
             PromiseOrValue::Value(self.insert_pending_transaction(PendingTransaction {
-                signature_requests: vec![SignatureRequest::new(predecessor.clone(), transaction)],
+                signature_requests: vec![SignatureRequest::new(&predecessor, transaction)],
                 sender_id: predecessor,
                 created_at_block_timestamp_ns: env::block_timestamp(),
             }))
@@ -566,14 +605,13 @@ impl Contract {
             gas: Some(paymaster_transaction_gas),
             gas_price: Some(transaction.gas_price().unwrap()),
             data: None,
-            // TODO: Nonce
-            nonce: None,
+            nonce: Some(paymaster.next_nonce().into()),
         }
         .into();
 
         let signature_requests = vec![
             SignatureRequest::new(&paymaster.key_path, paymaster_transaction),
-            SignatureRequest::new(predecessor.clone(), transaction),
+            SignatureRequest::new(&predecessor, transaction),
         ];
 
         self.insert_pending_transaction(PendingTransaction {

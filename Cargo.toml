@@ -1,6 +1,6 @@
 [package]
 authors = ["Jacob Lindahl <jacob.lindahl@near.org>"]
-name = "near-multichain-xchain-relayer"
+name = "near-multichain-gas-station-contract"
 version = "0.1.0"
 edition = "2021"
 

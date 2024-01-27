@@ -38,7 +38,6 @@ pub fn process_oracle_result(
     foreign_asset_id: &str,
     price_data: &PriceData,
 ) -> (u128, u128) {
-
     let (local_price, foreign_price) = match &price_data.prices[..] {
         [AssetOptionalPrice {
             asset_id: first_asset_id,

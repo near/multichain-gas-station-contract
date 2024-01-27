@@ -92,7 +92,7 @@ pub struct SignatureRequest {
 }
 
 impl SignatureRequest {
-    pub fn new(key_path: impl ToString, transaction: impl Into<TypedTransactionBorsh>) -> Self {
+    pub fn new(key_path: &impl ToString, transaction: impl Into<TypedTransactionBorsh>) -> Self {
         Self {
             status: SignatureRequestStatus::Pending {
                 key_path: key_path.to_string(),
