@@ -140,7 +140,7 @@ pub struct GetForeignChain {
 pub struct PendingTransaction {
     pub sender_id: AccountId,
     pub signature_requests: Vec<SignatureRequest>,
-    pub created_at_block_timestamp_ns: u64, // TODO: Transaction expiration
+    pub created_at_block_timestamp_ns: u64,
 }
 
 impl PendingTransaction {
@@ -169,7 +169,7 @@ pub struct Contract {
     pub oracle_id: AccountId,
     pub oracle_local_asset_id: String,
     pub flags: Flags,
-    pub expire_transaction_after_ns: u64,
+    pub expire_transaction_after_ns: u64, // TODO: Make configurable
     pub foreign_chains: UnorderedMap<u64, ForeignChainConfiguration>,
     pub sender_whitelist: UnorderedSet<ForeignAddress>,
     pub receiver_whitelist: UnorderedSet<ForeignAddress>,
@@ -636,14 +636,14 @@ impl Contract {
         require!(
             env::block_timestamp()
                 <= self.expire_transaction_after_ns + transaction.created_at_block_timestamp_ns,
-            "Transaction is expired"
+            "Transaction is expired",
         );
 
         let (index, next_signature_request, key_path) = transaction
             .signature_requests
             .iter_mut()
             .enumerate()
-            .filter_map(|(i, r)| match r.status {
+            .find_map(|(i, r)| match r.status {
                 SignatureRequestStatus::Pending {
                     ref mut in_flight,
                     ref key_path,
@@ -653,7 +653,6 @@ impl Contract {
                 }
                 _ => None,
             })
-            .next()
             .unwrap_or_else(|| env::panic_str("No pending or non-in-flight signature requests"));
 
         ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
@@ -722,7 +721,7 @@ impl Contract {
             "Unauthorized"
         );
 
-        for signature_request in transaction.signature_requests.iter() {
+        for signature_request in &transaction.signature_requests {
             if let SignatureRequestStatus::Pending { in_flight, .. } = signature_request.status {
                 require!(
                     !in_flight,
