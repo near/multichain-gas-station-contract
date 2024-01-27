@@ -1,0 +1,12 @@
+[package]
+name = "signer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+near-sdk.workspace = true
+near-multichain-gas-station-contract = { path = "../../" }
+
+[lib]
+crate-type = ["cdylib"]

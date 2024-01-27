@@ -1,6 +1,6 @@
 use std::{fmt::Display, str::FromStr};
 
-use ethers::{types::H160, utils::to_checksum};
+use ethers_core::{types::H160, utils::to_checksum};
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 
 #[derive(
@@ -58,9 +58,9 @@ impl From<ForeignAddress> for H160 {
 }
 
 impl FromStr for ForeignAddress {
-    type Err = ethers::utils::ConversionError;
+    type Err = ethers_core::utils::ConversionError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(ethers::utils::parse_checksummed(s, None)?.0))
+        Ok(Self(ethers_core::utils::parse_checksummed(s, None)?.0))
     }
 }

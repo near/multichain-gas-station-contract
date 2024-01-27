@@ -1,4 +1,4 @@
-use ethers::types::{transaction::eip2718::TypedTransaction, U256};
+use ethers_core::types::{transaction::eip2718::TypedTransaction, U256};
 
 use crate::ForeignChainTokenAmount;
 

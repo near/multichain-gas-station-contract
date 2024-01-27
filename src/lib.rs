@@ -1,7 +1,8 @@
-use ethers::{
+use ethers_core::{
     types::{transaction::eip2718::TypedTransaction, NameOrAddress, TransactionRequest, U256},
     utils::rlp::{Decodable, Rlp},
 };
+use getrandom::{register_custom_getrandom, Error};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,
@@ -13,22 +14,22 @@ use near_sdk::{
 };
 use near_sdk_contract_tools::{event, owner::*, standard::nep297::Event, Owner};
 
-mod oracle;
+pub mod oracle;
 use oracle::{ext_oracle, process_oracle_result, PriceData};
 
-mod signer_contract;
+pub mod signer_contract;
 use signer_contract::{ext_signer, MpcSignature};
 
-mod signature_request;
+pub mod signature_request;
 use signature_request::{SignatureRequest, SignatureRequestStatus};
 
-mod utils;
+pub mod utils;
 use utils::*;
 
-mod foreign_address;
+pub mod foreign_address;
 use foreign_address::ForeignAddress;
 
-type ForeignChainTokenAmount = ethers::types::U256;
+pub type ForeignChainTokenAmount = ethers_core::types::U256;
 
 // TODO: Events
 /// A successful request will emit two events, one for the request and one for
@@ -54,33 +55,35 @@ type ForeignChainTokenAmount = ethers::types::U256;
 //     },
 // }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
 pub struct TransactionDetails {
-    signed_transaction: String,
-    signed_paymaster_transaction: String,
+    pub signed_transaction: String,
+    pub signed_paymaster_transaction: String,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(
+    BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq,
+)]
 #[serde(crate = "near_sdk::serde")]
 pub struct Flags {
-    is_sender_whitelist_enabled: bool,
-    is_receiver_whitelist_enabled: bool,
+    pub is_sender_whitelist_enabled: bool,
+    pub is_receiver_whitelist_enabled: bool,
 }
 
-#[derive(Serialize, BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
 pub struct TransactionCreation {
-    id: U64,
-    pending_signature_count: u32,
+    pub id: U64,
+    pub pending_signature_count: u32,
 }
 
-#[derive(Serialize, BorshSerialize, BorshDeserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
 pub struct PaymasterConfiguration {
-    foreign_address: ForeignAddress,
-    nonce: u32,
-    key_path: String,
+    pub foreign_address: ForeignAddress,
+    pub nonce: u32,
+    pub key_path: String,
 }
 
 impl PaymasterConfiguration {
@@ -93,11 +96,11 @@ impl PaymasterConfiguration {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub struct ForeignChainConfiguration {
-    paymasters: Vector<PaymasterConfiguration>,
-    next_paymaster: u32,
-    transfer_gas: u128,
-    fee_rate: (u128, u128),
-    oracle_asset_id: String,
+    pub paymasters: Vector<PaymasterConfiguration>,
+    pub next_paymaster: u32,
+    pub transfer_gas: u128,
+    pub fee_rate: (u128, u128),
+    pub oracle_asset_id: String,
 }
 
 impl ForeignChainConfiguration {
@@ -128,16 +131,16 @@ impl ForeignChainConfiguration {
 #[derive(Serialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct GetForeignChain {
-    chain_id: U64,
-    oracle_asset_id: String,
+    pub chain_id: U64,
+    pub oracle_asset_id: String,
 }
 
 #[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct PendingTransaction {
-    sender_id: AccountId,
-    signature_requests: Vec<SignatureRequest>,
-    created_at_block_timestamp_ns: u64, // TODO: Transaction expiration
+    pub sender_id: AccountId,
+    pub signature_requests: Vec<SignatureRequest>,
+    pub created_at_block_timestamp_ns: u64, // TODO: Transaction expiration
 }
 
 impl PendingTransaction {
@@ -261,7 +264,7 @@ impl Contract {
         chain_id: U64,
         oracle_asset_id: String,
         transfer_gas: U128,
-        fee_scaling_factor: (U128, U128),
+        fee_rate: (U128, U128),
     ) {
         self.assert_owner();
 
@@ -271,7 +274,7 @@ impl Contract {
                 next_paymaster: 0,
                 oracle_asset_id,
                 transfer_gas: transfer_gas.0,
-                fee_rate: (fee_scaling_factor.0.into(), fee_scaling_factor.1.into()),
+                fee_rate: (fee_rate.0.into(), fee_rate.1.into()),
                 paymasters: Vector::new(StorageKey::Paymasters(chain_id.0)),
             },
         );
@@ -756,4 +759,11 @@ fn extract_transaction(
                 "A transaction must be provided in `transaction_json` or `transaction_rlp`",
             )
         })
+}
+
+register_custom_getrandom!(custom_getrandom);
+
+pub fn custom_getrandom(buf: &mut [u8]) -> Result<(), Error> {
+    buf.copy_from_slice(&env::random_seed_array());
+    Ok(())
 }

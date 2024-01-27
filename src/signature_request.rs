@@ -1,4 +1,4 @@
-use ethers::{
+use ethers_core::{
     types::transaction::eip2718::TypedTransaction,
     utils::rlp::{Decodable, Rlp},
 };
@@ -7,7 +7,7 @@ use near_sdk::{
     serde::{Deserialize, Serialize},
 };
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(
     crate = "near_sdk::serde",
     from = "TypedTransaction",
@@ -45,18 +45,18 @@ impl BorshDeserialize for TypedTransactionBorsh {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(
     crate = "near_sdk::serde",
-    from = "ethers::types::Signature",
-    into = "ethers::types::Signature"
+    from = "ethers_core::types::Signature",
+    into = "ethers_core::types::Signature"
 )]
-pub struct SignatureBorsh(pub ethers::types::Signature);
+pub struct SignatureBorsh(pub ethers_core::types::Signature);
 
-impl From<ethers::types::Signature> for SignatureBorsh {
-    fn from(signature: ethers::types::Signature) -> Self {
+impl From<ethers_core::types::Signature> for SignatureBorsh {
+    fn from(signature: ethers_core::types::Signature) -> Self {
         Self(signature)
     }
 }
 
-impl From<SignatureBorsh> for ethers::types::Signature {
+impl From<SignatureBorsh> for ethers_core::types::Signature {
     fn from(signature: SignatureBorsh) -> Self {
         signature.0
     }
@@ -72,19 +72,19 @@ impl BorshDeserialize for SignatureBorsh {
     fn deserialize(buf: &mut &[u8]) -> std::io::Result<Self> {
         let bytes = <[u8; 65] as BorshDeserialize>::deserialize(buf)?;
         Ok(Self(
-            ethers::types::Signature::try_from(&bytes[..]).unwrap(),
+            ethers_core::types::Signature::try_from(&bytes[..]).unwrap(),
         ))
     }
 }
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
 pub enum SignatureRequestStatus {
     Pending { key_path: String, in_flight: bool },
     Signed { signature: SignatureBorsh },
 }
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
 pub struct SignatureRequest {
     pub status: SignatureRequestStatus,

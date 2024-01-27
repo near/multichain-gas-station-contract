@@ -5,21 +5,21 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ethers = { version = "2", default-features = false }
+ethers-core = "2"
 getrandom = { version = "0.2", features = [
-    "js",
+    "custom",
 ] } # make this package happy for wasm target
 hex = "0.4"
-near-sdk = { version = "4.1.1", default-features = false, features = [
-    "wee_alloc",
-    "legacy",
-    "abi",
-] }
+near-sdk.workspace = true
 near-sdk-contract-tools = "2"
 thiserror = "1"
 
+[dev-dependencies]
+near-workspaces = { version = "0.10", features = ["unstable"] }
+tokio = "1.28"
+
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 [profile.release]
 codegen-units = 1
@@ -28,3 +28,14 @@ lto = true
 opt-level = "z"
 overflow-checks = true
 panic = "abort"
+# strip = true
+
+[workspace]
+members = [".", "mock/*"]
+
+[workspace.dependencies]
+near-sdk = { version = "4.1.1", default-features = false, features = [
+    "wee_alloc",
+    "legacy",
+    "abi",
+] }
