@@ -70,7 +70,7 @@ pub struct Flags {
 
 #[derive(Serialize, BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
-pub struct TransactionInitiation {
+pub struct TransactionCreation {
     id: U64,
     pending_signature_count: u32,
 }
@@ -157,6 +157,7 @@ pub enum StorageKey {
     PendingTransactions,
 }
 
+// TODO: Pausability
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Owner)]
 #[near_bindgen]
 pub struct Contract {
@@ -484,14 +485,14 @@ impl Contract {
     fn insert_pending_transaction(
         &mut self,
         pending_transaction: PendingTransaction,
-    ) -> TransactionInitiation {
+    ) -> TransactionCreation {
         let pending_signature_count = pending_transaction.signature_requests.len() as u32;
 
         let id = self.generate_unique_id();
 
         self.pending_transactions.insert(id, pending_transaction);
 
-        TransactionInitiation {
+        TransactionCreation {
             id: id.into(),
             pending_signature_count,
         }
@@ -500,12 +501,12 @@ impl Contract {
     // Public methods
 
     #[payable]
-    pub fn initiate_transaction(
+    pub fn create_transaction(
         &mut self,
         transaction_json: Option<TypedTransaction>,
         transaction_rlp: Option<String>,
         use_paymaster: Option<bool>,
-    ) -> PromiseOrValue<TransactionInitiation> {
+    ) -> PromiseOrValue<TransactionCreation> {
         let deposit = env::attached_deposit();
         require!(deposit > 0, "Deposit is required to pay for gas");
 
@@ -531,7 +532,7 @@ impl Contract {
                     foreign_chain_configuration.oracle_asset_id.clone(),
                 ]))
                 .then(
-                    Self::ext(env::current_account_id()).initiate_transaction_callback(
+                    Self::ext(env::current_account_id()).create_transaction_callback(
                         env::predecessor_account_id(),
                         deposit.into(),
                         transaction,
@@ -550,13 +551,13 @@ impl Contract {
     }
 
     #[private]
-    pub fn initiate_transaction_callback(
+    pub fn create_transaction_callback(
         &mut self,
         predecessor: AccountId,
         deposit: near_sdk::json_types::U128,
         transaction: TypedTransaction,
         #[callback_result] result: Result<PriceData, PromiseError>,
-    ) -> TransactionInitiation {
+    ) -> TransactionCreation {
         // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
         let foreign_chain_configuration = self
             .foreign_chains
@@ -624,12 +625,18 @@ impl Contract {
     pub fn sign_next(&mut self, id: U64) -> Promise {
         let id = id.0;
 
-        let (index, next_signature_request, key_path) = self
-            .pending_transactions
-            .get_mut(&id)
-            .unwrap_or_else(|| {
-                env::panic_str(&format!("Transaction signature request {id} not found"))
-            })
+        let transaction = self.pending_transactions.get_mut(&id).unwrap_or_else(|| {
+            env::panic_str(&format!("Transaction signature request {id} not found"))
+        });
+
+        // ensure not expired
+        require!(
+            env::block_timestamp()
+                <= self.expire_transaction_after_ns + transaction.created_at_block_timestamp_ns,
+            "Transaction is expired"
+        );
+
+        let (index, next_signature_request, key_path) = transaction
             .signature_requests
             .iter_mut()
             .enumerate()
@@ -680,6 +687,7 @@ impl Contract {
             ));
         }
 
+        // TODO: What to do if signing fails?
         let signature = result
             .unwrap_or_else(|e| env::panic_str(&format!("Failed to produce signature: {e:?}")))
             .try_into()
@@ -692,11 +700,39 @@ impl Contract {
         request.set_signature(signature);
 
         // Remove transaction if all requests have been signed
+        // TODO: Is this over-eager?
         if pending_transaction.all_signed() {
             self.pending_transactions.remove(&id);
         }
 
         hex::encode(&rlp_signed)
+    }
+
+    pub fn remove_transaction(&mut self, id: U64) {
+        let transaction = self
+            .pending_transactions
+            .get(&id.0)
+            .unwrap_or_else(|| env::panic_str("Transaction not found"));
+
+        require!(
+            transaction.sender_id == env::predecessor_account_id(),
+            "Unauthorized"
+        );
+
+        for signature_request in transaction.signature_requests.iter() {
+            if let SignatureRequestStatus::Pending { in_flight, .. } = signature_request.status {
+                require!(
+                    !in_flight,
+                    "Signature request is in-flight and cannot be removed"
+                );
+            }
+        }
+
+        // TODO: Refunds?
+        // If we do perform refunds, it should probably _only_ occur if _all_
+        // transactions are still "pending."
+
+        self.pending_transactions.remove(&id.0);
     }
 }
 
