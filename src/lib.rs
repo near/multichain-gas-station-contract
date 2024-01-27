@@ -7,7 +7,7 @@ use ethers::{
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,
-    json_types::U64,
+    json_types::{U128, U64},
     near_bindgen, require,
     serde::{Deserialize, Serialize},
     store::{UnorderedMap, UnorderedSet, Vector},
@@ -87,6 +87,8 @@ pub struct PaymasterConfiguration {
 pub struct ForeignChainConfiguration {
     paymasters: Vector<PaymasterConfiguration>,
     next_paymaster: u32,
+    transfer_gas: u128,
+    fee_rate: (u128, u128),
     oracle_asset_id: String,
 }
 
@@ -95,6 +97,22 @@ impl ForeignChainConfiguration {
         let paymaster = self.paymasters.get(self.next_paymaster);
         self.next_paymaster = (self.next_paymaster + 1) % self.paymasters.len();
         paymaster
+    }
+
+    fn foreign_token_price(
+        &self,
+        oracle_local_asset_id: &str,
+        price_data: &PriceData,
+        foreign_tokens: XChainTokenAmount,
+    ) -> u128 {
+        let foreign_token_price =
+            process_oracle_result(oracle_local_asset_id, &self.oracle_asset_id, price_data);
+
+        // calculate fee based on currently known price, and include fee rate
+        let a = foreign_tokens * U256::from(foreign_token_price.0) * U256::from(self.fee_rate.0);
+        let (b, rem) = a.div_mod(U256::from(foreign_token_price.1) * U256::from(self.fee_rate.1));
+        // round up
+        if rem.is_zero() { b } else { b + 1 }.as_u128()
     }
 }
 
@@ -110,6 +128,7 @@ pub struct GetForeignChain {
 pub struct PendingTransaction {
     sender_id: AccountId,
     signature_requests: Vec<SignatureRequest>,
+    created_at_block_timestamp_ns: u64, // TODO: Transaction expiration
 }
 
 impl PendingTransaction {
@@ -134,24 +153,12 @@ pub struct Contract {
     pub signer_contract_id: AccountId,
     pub oracle_id: AccountId,
     pub oracle_local_asset_id: String,
+    pub flags: Flags,
+    pub expire_transaction_after_ns: u64,
     pub foreign_chains: UnorderedMap<u64, ForeignChainConfiguration>,
     pub sender_whitelist: UnorderedSet<ForeignAddress>,
     pub receiver_whitelist: UnorderedSet<ForeignAddress>,
-    pub flags: Flags,
-    pub price_scale: (u128, u128),
     pub pending_transactions: UnorderedMap<u64, PendingTransaction>,
-}
-
-fn transaction_fee(
-    conversion_rate: (u128, u128),
-    price_scale: (u128, u128),
-    request_tokens_for_gas: XChainTokenAmount,
-) -> u128 {
-    // calculate fee based on currently known price, and include scaling factor
-    let a = request_tokens_for_gas * U256::from(conversion_rate.0) * U256::from(price_scale.0);
-    let (b, rem) = a.div_mod(U256::from(conversion_rate.1) * U256::from(price_scale.1));
-    // round up
-    if rem.is_zero() { b } else { b + 1 }.as_u128()
 }
 
 #[near_bindgen]
@@ -167,11 +174,11 @@ impl Contract {
             signer_contract_id,
             oracle_id,
             oracle_local_asset_id,
+            flags: Flags::default(),
+            expire_transaction_after_ns: 5 * 60 * 1_000_000_000, // 5 minutes
             foreign_chains: UnorderedMap::new(StorageKey::ForeignChains),
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
-            flags: Flags::default(),
-            price_scale: (120, 100), // +20% on top of oracle price
             pending_transactions: UnorderedMap::new(StorageKey::PendingTransactions),
         };
 
@@ -237,18 +244,43 @@ impl Contract {
         self.sender_whitelist.clear();
     }
 
-    pub fn configure_foreign_chain(&mut self, chain_id: U64, oracle_asset_id: String) {
+    pub fn add_foreign_chain(
+        &mut self,
+        chain_id: U64,
+        oracle_asset_id: String,
+        transfer_gas: U128,
+        fee_scaling_factor: (U128, U128),
+    ) {
         self.assert_owner();
-        let config =
-            self.foreign_chains
-                .entry(chain_id.0)
-                .or_insert_with(|| ForeignChainConfiguration {
-                    next_paymaster: 0,
-                    oracle_asset_id: String::new(),
-                    paymasters: Vector::new(StorageKey::Paymasters(chain_id.0)),
-                });
 
-        config.oracle_asset_id = oracle_asset_id;
+        self.foreign_chains.insert(
+            chain_id.0,
+            ForeignChainConfiguration {
+                next_paymaster: 0,
+                oracle_asset_id,
+                transfer_gas: transfer_gas.0,
+                fee_rate: (fee_scaling_factor.0.into(), fee_scaling_factor.1.into()),
+                paymasters: Vector::new(StorageKey::Paymasters(chain_id.0)),
+            },
+        );
+    }
+
+    pub fn set_foreign_chain_oracle_asset_id(&mut self, chain_id: U64, oracle_asset_id: String) {
+        self.assert_owner();
+        if let Some(config) = self.foreign_chains.get_mut(&chain_id.0) {
+            config.oracle_asset_id = oracle_asset_id;
+        } else {
+            env::panic_str("Foreign chain does not exist");
+        }
+    }
+
+    pub fn set_foreign_chain_transfer_gas(&mut self, chain_id: U64, transfer_gas: U128) {
+        self.assert_owner();
+        if let Some(config) = self.foreign_chains.get_mut(&chain_id.0) {
+            config.transfer_gas = transfer_gas.0;
+        } else {
+            env::panic_str("Foreign chain does not exist");
+        }
     }
 
     pub fn remove_foreign_chain(&mut self, chain_id: U64) {
@@ -315,8 +347,41 @@ impl Contract {
             .collect()
     }
 
+    pub fn list_transactions(&self) -> Vec<(U64, &PendingTransaction)> {
+        self.pending_transactions
+            .iter()
+            .map(|(id, tx)| ((*id).into(), tx))
+            .collect()
+    }
+
     pub fn get_transaction(&self, id: U64) -> Option<&PendingTransaction> {
         self.pending_transactions.get(&id.0)
+    }
+
+    pub fn estimate_gas_cost(&self, transaction: TypedTransaction, price_data: PriceData) -> U128 {
+        self.validate_transaction(&transaction);
+
+        let foreign_chain_configuration = self
+            .foreign_chains
+            .get(&transaction.chain_id().unwrap().as_u64())
+            .unwrap_or_else(|| {
+                env::panic_str(&format!(
+                    "Paymaster not supported for chain id {}",
+                    transaction.chain_id().unwrap()
+                ))
+            });
+
+        let paymaster_transaction_gas: U256 = foreign_chain_configuration.transfer_gas.into();
+        let request_tokens_for_gas =
+            foreign_tokens_for_gas(&transaction, paymaster_transaction_gas).unwrap();
+
+        foreign_chain_configuration
+            .foreign_token_price(
+                &self.oracle_local_asset_id,
+                &price_data,
+                request_tokens_for_gas,
+            )
+            .into()
     }
 
     // Private helper methods
@@ -440,6 +505,7 @@ impl Contract {
             PromiseOrValue::Value(self.insert_pending_transaction(PendingTransaction {
                 signature_requests: vec![SignatureRequest::new(predecessor.clone(), transaction)],
                 sender_id: predecessor,
+                created_at_block_timestamp_ns: env::block_timestamp(),
             }))
         }
     }
@@ -452,6 +518,7 @@ impl Contract {
         transaction: TypedTransaction,
         #[callback_result] result: Result<PriceData, PromiseError>,
     ) -> TransactionInitiation {
+        // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
         let foreign_chain_configuration = self
             .foreign_chains
             .get_mut(&transaction.chain_id().unwrap().as_u64())
@@ -462,14 +529,16 @@ impl Contract {
                 ))
             });
 
-        let gas_token_price = process_oracle_result(
+        let price_data = result.unwrap_or_else(|_| env::panic_str("Failed to fetch price data"));
+
+        let paymaster_transaction_gas: U256 = foreign_chain_configuration.transfer_gas.into();
+        let request_tokens_for_gas =
+            foreign_tokens_for_gas(&transaction, paymaster_transaction_gas).unwrap(); // Validation ensures gas is set.
+        let fee = foreign_chain_configuration.foreign_token_price(
             &self.oracle_local_asset_id,
-            &foreign_chain_configuration.oracle_asset_id,
-            result,
+            &price_data,
+            request_tokens_for_gas,
         );
-        let request_tokens_for_gas = tokens_for_gas(&transaction).unwrap(); // Validation ensures gas is set.
-        let fee = transaction_fee(gas_token_price, self.price_scale, request_tokens_for_gas);
-        // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
         let deposit = deposit.0;
 
         match deposit.checked_sub(fee) {
@@ -494,7 +563,11 @@ impl Contract {
             from: Some(paymaster.foreign_address.into()),
             to: Some((*transaction.from().unwrap()).into()),
             value: Some(request_tokens_for_gas),
-            ..Default::default()
+            gas: Some(paymaster_transaction_gas),
+            gas_price: Some(transaction.gas_price().unwrap()),
+            data: None,
+            // TODO: Nonce
+            nonce: None,
         }
         .into();
 
@@ -506,6 +579,7 @@ impl Contract {
         self.insert_pending_transaction(PendingTransaction {
             signature_requests,
             sender_id: predecessor,
+            created_at_block_timestamp_ns: env::block_timestamp(),
         })
     }
 

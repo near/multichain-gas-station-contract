@@ -3,7 +3,6 @@ use near_sdk::{
     env, ext_contract,
     json_types::{U128, U64},
     serde::{Deserialize, Serialize},
-    PromiseError,
 };
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone, Copy)]
@@ -37,9 +36,8 @@ pub trait Oracle {
 pub fn process_oracle_result(
     local_asset_id: &str,
     foreign_asset_id: &str,
-    result: Result<PriceData, PromiseError>,
+    price_data: &PriceData,
 ) -> (u128, u128) {
-    let price_data = result.unwrap_or_else(|_| env::panic_str("Failed to fetch price data"));
 
     let (local_price, foreign_price) = match &price_data.prices[..] {
         [AssetOptionalPrice {
