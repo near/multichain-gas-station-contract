@@ -429,13 +429,12 @@ impl Contract {
         }
     }
 
-    pub fn get_paymasters(&self, chain_id: U64) -> Vec<PaymasterConfiguration> {
+    pub fn get_paymasters(&self, chain_id: U64) -> Vec<&PaymasterConfiguration> {
         self.foreign_chains
             .get(&chain_id.0)
             .unwrap_or_else(|| env::panic_str("Foreign chain does not exist"))
             .paymasters
             .iter()
-            .cloned()
             .collect()
     }
 
