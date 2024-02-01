@@ -12,7 +12,7 @@ use near_sdk::{
     store::{UnorderedMap, UnorderedSet, Vector},
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
-use near_sdk_contract_tools::{event, owner::*, standard::nep297::Event, Owner};
+use near_sdk_contract_tools::{event, ft::ext_nep141, owner::*, standard::nep297::Event, Owner};
 
 pub mod oracle;
 use oracle::{ext_oracle, process_oracle_result, PriceData};
@@ -23,14 +23,13 @@ use signer_contract::{ext_signer, MpcSignature};
 pub mod signature_request;
 use signature_request::{SignatureRequest, SignatureRequestStatus};
 
-pub mod utils;
-use utils::*;
-
 pub mod foreign_address;
 use foreign_address::ForeignAddress;
 
 pub type ForeignChainTokenAmount = ethers_core::types::U256;
 
+// TODO: Storage management
+// TODO: Withdrawals
 // TODO: Events
 /// A successful request will emit two events, one for the request and one for
 /// the finalized transaction, in that order. The `id` field will be the same
@@ -135,12 +134,68 @@ pub struct GetForeignChain {
     pub oracle_asset_id: String,
 }
 
+#[derive(
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Clone,
+    Debug,
+)]
+#[serde(crate = "near_sdk::serde")]
+pub enum AssetId {
+    Native,
+    Nep141(AccountId),
+}
+
+impl AssetId {
+    pub fn transfer(&self, receiver_id: AccountId, amount: impl Into<u128>) -> Promise {
+        match self {
+            AssetId::Native => Promise::new(receiver_id).transfer(amount.into()),
+            AssetId::Nep141(contract_id) => ext_nep141::ext(contract_id.clone()).ft_transfer(
+                receiver_id,
+                U128(amount.into()),
+                None,
+            ),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug)]
+#[serde(crate = "near_sdk::serde")]
+pub struct AssetBalance {
+    pub asset_id: AssetId,
+    pub amount: U128,
+}
+
+impl AssetBalance {
+    pub fn native(amount: impl Into<U128>) -> Self {
+        Self {
+            asset_id: AssetId::Native,
+            amount: amount.into(),
+        }
+    }
+
+    pub fn nep141(account_id: AccountId, amount: impl Into<U128>) -> Self {
+        Self {
+            asset_id: AssetId::Nep141(account_id),
+            amount: amount.into(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct PendingTransaction {
     pub sender_id: AccountId,
     pub signature_requests: Vec<SignatureRequest>,
-    pub created_at_block_timestamp_ns: u64,
+    pub created_at_block_timestamp_ns: U64,
+    pub escrow: Option<AssetBalance>,
 }
 
 impl PendingTransaction {
@@ -158,6 +213,7 @@ pub enum StorageKey {
     ForeignChains,
     Paymasters(u64),
     PendingTransactions,
+    CollectedFees,
 }
 
 // TODO: Pausability
@@ -174,6 +230,7 @@ pub struct Contract {
     pub sender_whitelist: UnorderedSet<ForeignAddress>,
     pub receiver_whitelist: UnorderedSet<ForeignAddress>,
     pub pending_transactions: UnorderedMap<u64, PendingTransaction>,
+    pub collected_fees: UnorderedMap<AssetId, U128>,
 }
 
 #[near_bindgen]
@@ -195,6 +252,7 @@ impl Contract {
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
             pending_transactions: UnorderedMap::new(StorageKey::PendingTransactions),
+            collected_fees: UnorderedMap::new(StorageKey::CollectedFees),
         };
 
         Owner::init(&mut contract, &env::predecessor_account_id());
@@ -401,6 +459,27 @@ impl Contract {
         self.pending_transactions.get(&id.0)
     }
 
+    pub fn withdraw_collected_fees(&mut self, asset_id: AssetId, amount: Option<U128>) -> Promise {
+        self.assert_owner();
+        let fees = self
+            .collected_fees
+            .get_mut(&asset_id)
+            .unwrap_or_else(|| env::panic_str("No fee entry for provided asset ID"));
+
+        let amount = amount.unwrap_or_else(|| fees.0.into());
+
+        fees.0 = fees
+            .0
+            .checked_sub(amount.0)
+            .unwrap_or_else(|| env::panic_str("Not enough fees to withdraw"));
+
+        asset_id.transfer(self.own_get_owner().unwrap(), amount)
+    }
+
+    pub fn get_collected_fees(&self) -> std::collections::HashMap<&AssetId, &U128> {
+        self.collected_fees.iter().collect()
+    }
+
     pub fn estimate_gas_cost(&self, transaction: TypedTransaction, price_data: PriceData) -> U128 {
         self.validate_transaction(&transaction);
 
@@ -415,8 +494,8 @@ impl Contract {
             });
 
         let paymaster_transaction_gas: U256 = foreign_chain_configuration.transfer_gas.into();
-        let request_tokens_for_gas =
-            foreign_tokens_for_gas(&transaction, paymaster_transaction_gas).unwrap();
+        let request_tokens_for_gas = (transaction.gas().unwrap() + paymaster_transaction_gas)
+            * transaction.gas_price().unwrap();
 
         foreign_chain_configuration
             .foreign_token_price(
@@ -548,7 +627,8 @@ impl Contract {
             PromiseOrValue::Value(self.insert_pending_transaction(PendingTransaction {
                 signature_requests: vec![SignatureRequest::new(&predecessor, transaction)],
                 sender_id: predecessor,
-                created_at_block_timestamp_ns: env::block_timestamp(),
+                created_at_block_timestamp_ns: env::block_timestamp().into(),
+                escrow: None,
             }))
         }
     }
@@ -575,8 +655,10 @@ impl Contract {
         let price_data = result.unwrap_or_else(|_| env::panic_str("Failed to fetch price data"));
 
         let paymaster_transaction_gas: U256 = foreign_chain_configuration.transfer_gas.into();
+        let gas_price = transaction.gas_price().unwrap();
         let request_tokens_for_gas =
-            foreign_tokens_for_gas(&transaction, paymaster_transaction_gas).unwrap(); // Validation ensures gas is set.
+            (transaction.gas().unwrap() + paymaster_transaction_gas) * gas_price; // Validation ensures gas is set.
+
         let fee = foreign_chain_configuration.foreign_token_price(
             &self.oracle_local_asset_id,
             &price_data,
@@ -607,7 +689,7 @@ impl Contract {
             to: Some((*transaction.from().unwrap()).into()),
             value: Some(request_tokens_for_gas),
             gas: Some(paymaster_transaction_gas),
-            gas_price: Some(transaction.gas_price().unwrap()),
+            gas_price: Some(gas_price),
             data: None,
             nonce: Some(paymaster.next_nonce().into()),
         }
@@ -621,7 +703,8 @@ impl Contract {
         self.insert_pending_transaction(PendingTransaction {
             signature_requests,
             sender_id: predecessor,
-            created_at_block_timestamp_ns: env::block_timestamp(),
+            created_at_block_timestamp_ns: env::block_timestamp().into(),
+            escrow: Some(AssetBalance::native(fee)),
         })
     }
 
@@ -635,7 +718,7 @@ impl Contract {
         // ensure not expired
         require!(
             env::block_timestamp()
-                <= self.expire_transaction_after_ns + transaction.created_at_block_timestamp_ns,
+                <= self.expire_transaction_after_ns + transaction.created_at_block_timestamp_ns.0,
             "Transaction is expired",
         );
 
@@ -701,6 +784,16 @@ impl Contract {
 
         request.set_signature(signature);
 
+        // Remove escrow from record.
+        // This is important to ensuring that refund logic works correctly.
+        if let Some(escrow) = pending_transaction.escrow.take() {
+            let collected_fees = self
+                .collected_fees
+                .entry(escrow.asset_id.clone())
+                .or_insert(U128(0));
+            collected_fees.0 += escrow.amount.0;
+        }
+
         // Remove transaction if all requests have been signed
         // TODO: Is this over-eager?
         if pending_transaction.all_signed() {
@@ -710,7 +803,7 @@ impl Contract {
         hex::encode(&rlp_signed)
     }
 
-    pub fn remove_transaction(&mut self, id: U64) {
+    pub fn remove_transaction(&mut self, id: U64) -> PromiseOrValue<()> {
         let transaction = self
             .pending_transactions
             .get(&id.0)
@@ -730,11 +823,21 @@ impl Contract {
             }
         }
 
-        // TODO: Refunds?
-        // If we do perform refunds, it should probably _only_ occur if _all_
-        // transactions are still "pending."
+        let ret = transaction
+            .escrow
+            .as_ref()
+            .map(|escrow| {
+                PromiseOrValue::Promise(
+                    escrow
+                        .asset_id
+                        .transfer(transaction.sender_id.clone(), escrow.amount),
+                )
+            })
+            .unwrap_or(PromiseOrValue::Value(()));
 
         self.pending_transactions.remove(&id.0);
+
+        ret
     }
 }
 
