@@ -1,7 +1,4 @@
-use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, U256},
-    utils::rlp::{Decodable, Rlp},
-};
+use ethers_core::types::U256;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     serde::{Deserialize, Serialize},
@@ -9,41 +6,6 @@ use near_sdk::{
 use schemars::JsonSchema;
 
 use crate::valid_transaction_request::ValidTransactionRequest;
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(
-    crate = "near_sdk::serde",
-    from = "TypedTransaction",
-    into = "TypedTransaction"
-)]
-pub struct TypedTransactionBorsh(pub TypedTransaction);
-
-impl From<TypedTransaction> for TypedTransactionBorsh {
-    fn from(transaction: TypedTransaction) -> Self {
-        TypedTransactionBorsh(transaction)
-    }
-}
-
-impl From<TypedTransactionBorsh> for TypedTransaction {
-    fn from(transaction: TypedTransactionBorsh) -> Self {
-        transaction.0
-    }
-}
-
-impl BorshSerialize for TypedTransactionBorsh {
-    fn serialize<W: std::io::prelude::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        BorshSerialize::serialize(&self.0.rlp().to_vec(), writer)
-    }
-}
-
-impl BorshDeserialize for TypedTransactionBorsh {
-    fn deserialize(buf: &mut &[u8]) -> std::io::Result<Self> {
-        let bytes = <Vec<u8> as BorshDeserialize>::deserialize(buf)?;
-        let rlp = Rlp::new(&bytes);
-        let transaction = TypedTransaction::decode(&rlp).unwrap();
-        Ok(TypedTransactionBorsh(transaction))
-    }
-}
 
 #[derive(
     Serialize,
