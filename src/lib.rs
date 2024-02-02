@@ -33,7 +33,6 @@ use foreign_address::ForeignAddress;
 pub type ForeignChainTokenAmount = ethers_core::types::U256;
 
 // TODO: Storage management
-// TODO: Withdrawals
 // TODO: Events
 /// A successful request will emit two events, one for the request and one for
 /// the finalized transaction, in that order. The `id` field will be the same
@@ -734,32 +733,25 @@ impl Contract {
             "Transaction is expired",
         );
 
-        let (index, next_signature_request, key_path) = transaction
+        let (index, next_signature_request) = transaction
             .signature_requests
             .iter_mut()
             .enumerate()
-            .find_map(|(i, r)| match r.status {
-                SignatureRequestStatus::Pending {
-                    ref mut in_flight,
-                    ref key_path,
-                } if !*in_flight => {
-                    *in_flight = true;
-                    Some((i as u32, &r.transaction, key_path))
-                }
-                _ => None,
-            })
+            .find(|(_, r)| r.is_pending())
             .unwrap_or_else(|| env::panic_str("No pending or non-in-flight signature requests"));
+
+        next_signature_request.status = SignatureRequestStatus::InFlight;
 
         ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
             .sign(
                 <TypedTransaction as From<ValidTransactionRequest>>::from(
-                    next_signature_request.clone(),
+                    next_signature_request.transaction.clone(),
                 )
                 .sighash()
                 .0,
-                key_path,
+                &next_signature_request.key_path,
             )
-            .then(Self::ext(env::current_account_id()).sign_next_callback(id.into(), index))
+            .then(Self::ext(env::current_account_id()).sign_next_callback(id.into(), index as u32))
     }
 
     #[private]
@@ -835,12 +827,10 @@ impl Contract {
         );
 
         for signature_request in &transaction.signature_requests {
-            if let SignatureRequestStatus::Pending { in_flight, .. } = signature_request.status {
-                require!(
-                    !in_flight,
-                    "Signature request is in-flight and cannot be removed"
-                );
-            }
+            require!(
+                !signature_request.is_in_flight(),
+                "Signature request is in-flight and cannot be removed",
+            );
         }
 
         let ret = transaction

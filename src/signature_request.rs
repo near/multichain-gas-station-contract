@@ -60,7 +60,8 @@ impl From<SignatureBorsh> for ethers_core::types::Signature {
 )]
 #[serde(crate = "near_sdk::serde")]
 pub enum SignatureRequestStatus {
-    Pending { key_path: String, in_flight: bool },
+    Pending,
+    InFlight,
     Signed { signature: SignatureBorsh },
 }
 
@@ -78,22 +79,25 @@ pub enum SignatureRequestStatus {
 #[serde(crate = "near_sdk::serde")]
 pub struct SignatureRequest {
     pub status: SignatureRequestStatus,
+    pub key_path: String,
     pub transaction: ValidTransactionRequest,
 }
 
 impl SignatureRequest {
     pub fn new(key_path: &impl ToString, transaction: ValidTransactionRequest) -> Self {
         Self {
-            status: SignatureRequestStatus::Pending {
-                key_path: key_path.to_string(),
-                in_flight: false,
-            },
+            status: SignatureRequestStatus::Pending,
+            key_path: key_path.to_string(),
             transaction,
         }
     }
 
     pub const fn is_pending(&self) -> bool {
         matches!(self.status, SignatureRequestStatus::Pending { .. })
+    }
+
+    pub const fn is_in_flight(&self) -> bool {
+        matches!(self.status, SignatureRequestStatus::InFlight { .. })
     }
 
     pub const fn is_signed(&self) -> bool {
