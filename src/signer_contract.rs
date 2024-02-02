@@ -4,6 +4,7 @@ use near_sdk::{
     serde::{Deserialize, Serialize},
     PromiseOrValue, PublicKey,
 };
+use schemars::JsonSchema;
 use thiserror::Error;
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
@@ -38,7 +39,7 @@ pub trait SignerContract {
     fn state(&self) -> ProtocolContractState;
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
 pub struct MpcSignature(String, String);
 

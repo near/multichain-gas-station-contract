@@ -5,13 +5,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ethers-core = "2"
+bytes = "1.5.0"
+ethers-core = "2.0.13"
 getrandom = { version = "0.2", features = [
     "custom",
 ] } # make this package happy for wasm target
 hex = "0.4"
 near-sdk.workspace = true
-near-sdk-contract-tools = "2"
+near-sdk-contract-tools = "2.1"
+schemars = { version = "0.8.16", features = ["bytes"] }
 thiserror = "1"
 
 [dev-dependencies]

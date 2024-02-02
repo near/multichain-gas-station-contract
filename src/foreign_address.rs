@@ -1,7 +1,11 @@
 use std::{fmt::Display, str::FromStr};
 
-use ethers_core::{types::H160, utils::to_checksum};
+use ethers_core::{
+    types::{NameOrAddress, H160},
+    utils::to_checksum,
+};
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
+use schemars::JsonSchema;
 
 #[derive(
     BorshSerialize, BorshDeserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Clone, Debug,
@@ -24,6 +28,20 @@ impl<'de> near_sdk::serde::Deserialize<'de> for ForeignAddress {
     {
         let s = <String as near_sdk::serde::Deserialize>::deserialize(deserializer)?;
         ForeignAddress::from_str(&s).map_err(near_sdk::serde::de::Error::custom)
+    }
+}
+
+impl JsonSchema for ForeignAddress {
+    fn schema_name() -> String {
+        String::schema_name()
+    }
+
+    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        String::json_schema(gen)
+    }
+
+    fn is_referenceable() -> bool {
+        false
     }
 }
 
@@ -54,6 +72,12 @@ impl From<H160> for ForeignAddress {
 impl From<ForeignAddress> for H160 {
     fn from(value: ForeignAddress) -> Self {
         Self(value.0)
+    }
+}
+
+impl From<ForeignAddress> for NameOrAddress {
+    fn from(value: ForeignAddress) -> Self {
+        Self::Address(value.into())
     }
 }
 

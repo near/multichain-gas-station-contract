@@ -1,11 +1,14 @@
 use ethers_core::{
-    types::transaction::eip2718::TypedTransaction,
+    types::{transaction::eip2718::TypedTransaction, U256},
     utils::rlp::{Decodable, Rlp},
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     serde::{Deserialize, Serialize},
 };
+use schemars::JsonSchema;
+
+use crate::valid_transaction_request::ValidTransactionRequest;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(
@@ -42,63 +45,88 @@ impl BorshDeserialize for TypedTransactionBorsh {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(
-    crate = "near_sdk::serde",
-    from = "ethers_core::types::Signature",
-    into = "ethers_core::types::Signature"
+#[derive(
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+    JsonSchema,
+    Default,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
 )]
-pub struct SignatureBorsh(pub ethers_core::types::Signature);
+#[serde(crate = "near_sdk::serde")]
+pub struct SignatureBorsh {
+    r: [u8; 32],
+    s: [u8; 32],
+    v: u8,
+}
 
 impl From<ethers_core::types::Signature> for SignatureBorsh {
     fn from(signature: ethers_core::types::Signature) -> Self {
-        Self(signature)
+        let mut r = [0u8; 32];
+        signature.r.to_big_endian(&mut r);
+        let mut s = [0u8; 32];
+        signature.s.to_big_endian(&mut s);
+        let v = signature.v as u8;
+        Self { r, s, v }
     }
 }
 
 impl From<SignatureBorsh> for ethers_core::types::Signature {
     fn from(signature: SignatureBorsh) -> Self {
-        signature.0
+        ethers_core::types::Signature {
+            r: U256::from_big_endian(&signature.r),
+            s: U256::from_big_endian(&signature.s),
+            v: signature.v as u64,
+        }
     }
 }
 
-impl BorshSerialize for SignatureBorsh {
-    fn serialize<W: std::io::prelude::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        BorshSerialize::serialize(&<[u8; 65]>::from(self.0), writer)
-    }
-}
-
-impl BorshDeserialize for SignatureBorsh {
-    fn deserialize(buf: &mut &[u8]) -> std::io::Result<Self> {
-        let bytes = <[u8; 65] as BorshDeserialize>::deserialize(buf)?;
-        Ok(Self(
-            ethers_core::types::Signature::try_from(&bytes[..]).unwrap(),
-        ))
-    }
-}
-
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    BorshDeserialize,
+    BorshSerialize,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
 #[serde(crate = "near_sdk::serde")]
 pub enum SignatureRequestStatus {
     Pending { key_path: String, in_flight: bool },
     Signed { signature: SignatureBorsh },
 }
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    BorshDeserialize,
+    BorshSerialize,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
 #[serde(crate = "near_sdk::serde")]
 pub struct SignatureRequest {
     pub status: SignatureRequestStatus,
-    pub transaction: TypedTransactionBorsh,
+    pub transaction: ValidTransactionRequest,
 }
 
 impl SignatureRequest {
-    pub fn new(key_path: &impl ToString, transaction: impl Into<TypedTransactionBorsh>) -> Self {
+    pub fn new(key_path: &impl ToString, transaction: ValidTransactionRequest) -> Self {
         Self {
             status: SignatureRequestStatus::Pending {
                 key_path: key_path.to_string(),
                 in_flight: false,
             },
-            transaction: transaction.into(),
+            transaction,
         }
     }
 

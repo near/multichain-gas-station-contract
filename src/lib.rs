@@ -1,5 +1,5 @@
 use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, NameOrAddress, TransactionRequest, U256},
+    types::{transaction::eip2718::TypedTransaction, TransactionRequest, U256},
     utils::rlp::{Decodable, Rlp},
 };
 use getrandom::{register_custom_getrandom, Error};
@@ -13,6 +13,10 @@ use near_sdk::{
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
 use near_sdk_contract_tools::{event, ft::ext_nep141, owner::*, standard::nep297::Event, Owner};
+use schemars::JsonSchema;
+
+pub mod valid_transaction_request;
+use valid_transaction_request::ValidTransactionRequest;
 
 pub mod oracle;
 use oracle::{ext_oracle, process_oracle_result, PriceData};
@@ -54,7 +58,7 @@ pub type ForeignChainTokenAmount = ethers_core::types::U256;
 //     },
 // }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
 pub struct TransactionDetails {
     pub signed_transaction: String,
@@ -62,7 +66,16 @@ pub struct TransactionDetails {
 }
 
 #[derive(
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq,
+    BorshSerialize,
+    BorshDeserialize,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
 )]
 #[serde(crate = "near_sdk::serde")]
 pub struct Flags {
@@ -70,14 +83,34 @@ pub struct Flags {
     pub is_receiver_whitelist_enabled: bool,
 }
 
-#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+    JsonSchema,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+)]
 #[serde(crate = "near_sdk::serde")]
 pub struct TransactionCreation {
     pub id: U64,
     pub pending_signature_count: u32,
 }
 
-#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+    JsonSchema,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+)]
 #[serde(crate = "near_sdk::serde")]
 pub struct PaymasterConfiguration {
     pub foreign_address: ForeignAddress,
@@ -97,12 +130,16 @@ impl PaymasterConfiguration {
 pub struct ForeignChainConfiguration {
     pub paymasters: Vector<PaymasterConfiguration>,
     pub next_paymaster: u32,
-    pub transfer_gas: u128,
+    pub transfer_gas: [u64; 4],
     pub fee_rate: (u128, u128),
     pub oracle_asset_id: String,
 }
 
 impl ForeignChainConfiguration {
+    pub fn transfer_gas(&self) -> U256 {
+        U256(self.transfer_gas)
+    }
+
     pub fn next_paymaster(&mut self) -> Option<&mut PaymasterConfiguration> {
         let next_paymaster = self.next_paymaster;
         self.next_paymaster = (self.next_paymaster + 1) % self.paymasters.len();
@@ -127,7 +164,7 @@ impl ForeignChainConfiguration {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 pub struct GetForeignChain {
     pub chain_id: U64,
@@ -139,6 +176,7 @@ pub struct GetForeignChain {
     Deserialize,
     BorshSerialize,
     BorshDeserialize,
+    JsonSchema,
     PartialEq,
     Eq,
     PartialOrd,
@@ -166,7 +204,7 @@ impl AssetId {
     }
 }
 
-#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, JsonSchema, BorshSerialize, BorshDeserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct AssetBalance {
     pub asset_id: AssetId,
@@ -189,7 +227,7 @@ impl AssetBalance {
     }
 }
 
-#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, JsonSchema, BorshSerialize, BorshDeserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
 pub struct PendingTransaction {
     pub sender_id: AccountId,
@@ -331,7 +369,7 @@ impl Contract {
             ForeignChainConfiguration {
                 next_paymaster: 0,
                 oracle_asset_id,
-                transfer_gas: transfer_gas.0,
+                transfer_gas: U256::from(transfer_gas.0).0,
                 fee_rate: (fee_rate.0.into(), fee_rate.1.into()),
                 paymasters: Vector::new(StorageKey::Paymasters(chain_id.0)),
             },
@@ -350,7 +388,7 @@ impl Contract {
     pub fn set_foreign_chain_transfer_gas(&mut self, chain_id: U64, transfer_gas: U128) {
         self.assert_owner();
         if let Some(config) = self.foreign_chains.get_mut(&chain_id.0) {
-            config.transfer_gas = transfer_gas.0;
+            config.transfer_gas = U256::from(transfer_gas.0).0;
         } else {
             env::panic_str("Foreign chain does not exist");
         }
@@ -459,13 +497,14 @@ impl Contract {
     }
 
     pub fn withdraw_collected_fees(&mut self, asset_id: AssetId, amount: Option<U128>) -> Promise {
+        near_sdk::assert_one_yocto();
         self.assert_owner();
         let fees = self
             .collected_fees
             .get_mut(&asset_id)
             .unwrap_or_else(|| env::panic_str("No fee entry for provided asset ID"));
 
-        let amount = amount.unwrap_or_else(|| fees.0.into());
+        let amount = amount.unwrap_or(U128(fees.0));
 
         fees.0 = fees
             .0
@@ -479,22 +518,26 @@ impl Contract {
         self.collected_fees.iter().collect()
     }
 
-    pub fn estimate_gas_cost(&self, transaction: TypedTransaction, price_data: PriceData) -> U128 {
-        self.validate_transaction(&transaction);
+    pub fn estimate_gas_cost(&self, transaction_rlp_hex: String, price_data: PriceData) -> U128 {
+        let transaction =
+            ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
+                .unwrap_or_else(|e| env::panic_str(&format!("Invalid transaction request: {e}")));
+
+        self.filter_transaction(&transaction);
 
         let foreign_chain_configuration = self
             .foreign_chains
-            .get(&transaction.chain_id().unwrap().as_u64())
+            .get(&transaction.chain_id)
             .unwrap_or_else(|| {
                 env::panic_str(&format!(
                     "Paymaster not supported for chain id {}",
-                    transaction.chain_id().unwrap()
+                    transaction.chain_id
                 ))
             });
 
-        let paymaster_transaction_gas: U256 = foreign_chain_configuration.transfer_gas.into();
-        let request_tokens_for_gas = (transaction.gas().unwrap() + paymaster_transaction_gas)
-            * transaction.gas_price().unwrap();
+        let paymaster_transaction_gas = foreign_chain_configuration.transfer_gas();
+        let request_tokens_for_gas =
+            (transaction.gas() + paymaster_transaction_gas) * transaction.gas_price();
 
         foreign_chain_configuration
             .foreign_token_price(
@@ -515,49 +558,19 @@ impl Contract {
         id
     }
 
-    fn validate_transaction(&self, transaction: &TypedTransaction) {
-        require!(
-            transaction.gas().is_some() && transaction.gas_price().is_some(),
-            "Gas must be explicitly specified",
-        );
-
-        require!(
-            transaction.chain_id().is_some(),
-            "Chain ID must be explicitly specified",
-        );
-
-        // Validate receiver
-        let receiver: Option<ForeignAddress> = match transaction.to() {
-            Some(NameOrAddress::Name(_)) => {
-                env::panic_str("ENS names are not supported");
-            }
-            Some(NameOrAddress::Address(address)) => Some(address.into()),
-            None => None,
-        };
-
-        // Validate receiver
-        if let Some(ref receiver) = receiver {
-            // Check receiver whitelist
-            if self.flags.is_receiver_whitelist_enabled {
-                require!(
-                    self.receiver_whitelist.contains(receiver),
-                    "Receiver is not whitelisted",
-                );
-            }
-        } else {
-            // No receiver means contract deployment
-            env::panic_str("Deployment is not allowed");
-        };
+    fn filter_transaction(&self, transaction: &ValidTransactionRequest) {
+        // Check receiver whitelist
+        if self.flags.is_receiver_whitelist_enabled {
+            require!(
+                self.receiver_whitelist.contains(&transaction.receiver),
+                "Receiver is not whitelisted",
+            );
+        }
 
         // Check sender whitelist
         if self.flags.is_sender_whitelist_enabled {
             require!(
-                self.sender_whitelist.contains(
-                    &transaction
-                        .from()
-                        .unwrap_or_else(|| env::panic_str("Sender whitelist is enabled"))
-                        .into()
-                ),
+                self.sender_whitelist.contains(&transaction.sender),
                 "Sender is not whitelisted",
             );
         }
@@ -584,22 +597,23 @@ impl Contract {
     #[payable]
     pub fn create_transaction(
         &mut self,
-        transaction_json: Option<TypedTransaction>,
-        transaction_rlp: Option<String>,
+        transaction_rlp_hex: String,
         use_paymaster: Option<bool>,
     ) -> PromiseOrValue<TransactionCreation> {
         let deposit = env::attached_deposit();
         require!(deposit > 0, "Deposit is required to pay for gas");
 
-        let transaction = extract_transaction(transaction_json, transaction_rlp);
+        let transaction =
+            ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
+                .unwrap_or_else(|e| env::panic_str(&format!("Invalid transaction request: {e}")));
 
         // Guarantees invariants required in callback
-        self.validate_transaction(&transaction);
+        self.filter_transaction(&transaction);
 
         let use_paymaster = use_paymaster.unwrap_or(false);
 
         if use_paymaster {
-            let chain_id = transaction.chain_id().unwrap();
+            let chain_id = transaction.chain_id();
             let foreign_chain_configuration = self
                 .foreign_chains
                 .get(&chain_id.as_u64())
@@ -635,28 +649,28 @@ impl Contract {
     #[private]
     pub fn create_transaction_callback(
         &mut self,
-        predecessor: AccountId,
-        deposit: near_sdk::json_types::U128,
-        transaction: TypedTransaction,
+        #[serializer(borsh)] predecessor: AccountId,
+        #[serializer(borsh)] deposit: near_sdk::json_types::U128,
+        #[serializer(borsh)] transaction_request: ValidTransactionRequest,
         #[callback_result] result: Result<PriceData, PromiseError>,
     ) -> TransactionCreation {
         // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
         let foreign_chain_configuration = self
             .foreign_chains
-            .get_mut(&transaction.chain_id().unwrap().as_u64())
+            .get_mut(&transaction_request.chain_id)
             .unwrap_or_else(|| {
                 env::panic_str(&format!(
                     "Paymaster not supported for chain id {}",
-                    transaction.chain_id().unwrap()
+                    transaction_request.chain_id
                 ))
             });
 
         let price_data = result.unwrap_or_else(|_| env::panic_str("Failed to fetch price data"));
 
-        let paymaster_transaction_gas: U256 = foreign_chain_configuration.transfer_gas.into();
-        let gas_price = transaction.gas_price().unwrap();
+        let paymaster_transaction_gas = foreign_chain_configuration.transfer_gas();
+        let gas_price = transaction_request.gas_price();
         let request_tokens_for_gas =
-            (transaction.gas().unwrap() + paymaster_transaction_gas) * gas_price; // Validation ensures gas is set.
+            (transaction_request.gas() + paymaster_transaction_gas) * gas_price; // Validation ensures gas is set.
 
         let fee = foreign_chain_configuration.foreign_token_price(
             &self.oracle_local_asset_id,
@@ -682,21 +696,20 @@ impl Contract {
             .next_paymaster()
             .unwrap_or_else(|| env::panic_str("No paymasters found"));
 
-        let paymaster_transaction: TypedTransaction = TransactionRequest {
-            chain_id: Some(transaction.chain_id().unwrap()),
-            from: Some(paymaster.foreign_address.into()),
-            to: Some((*transaction.from().unwrap()).into()),
-            value: Some(request_tokens_for_gas),
-            gas: Some(paymaster_transaction_gas),
-            gas_price: Some(gas_price),
-            data: None,
-            nonce: Some(paymaster.next_nonce().into()),
-        }
-        .into();
+        let paymaster_transaction = ValidTransactionRequest {
+            chain_id: transaction_request.chain_id,
+            sender: paymaster.foreign_address,
+            receiver: transaction_request.sender,
+            value: request_tokens_for_gas.0,
+            gas: paymaster_transaction_gas.0,
+            gas_price: gas_price.0,
+            data: vec![],
+            nonce: U256::from(paymaster.next_nonce()).0,
+        };
 
         let signature_requests = vec![
             SignatureRequest::new(&paymaster.key_path, paymaster_transaction),
-            SignatureRequest::new(&predecessor, transaction),
+            SignatureRequest::new(&predecessor, transaction_request),
         ];
 
         self.insert_pending_transaction(PendingTransaction {
@@ -738,7 +751,14 @@ impl Contract {
             .unwrap_or_else(|| env::panic_str("No pending or non-in-flight signature requests"));
 
         ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
-            .sign(next_signature_request.0.sighash().0, key_path)
+            .sign(
+                <TypedTransaction as From<ValidTransactionRequest>>::from(
+                    next_signature_request.clone(),
+                )
+                .sighash()
+                .0,
+                key_path,
+            )
             .then(Self::ext(env::current_account_id()).sign_next_callback(id.into(), index))
     }
 
@@ -777,7 +797,7 @@ impl Contract {
             .try_into()
             .unwrap_or_else(|e| env::panic_str(&format!("Failed to decode signature: {e:?}")));
 
-        let transaction = &request.transaction.0;
+        let transaction: TypedTransaction = request.transaction.clone().into();
 
         let rlp_signed = transaction.rlp_signed(&signature);
 
@@ -796,6 +816,7 @@ impl Contract {
         // Remove transaction if all requests have been signed
         // TODO: Is this over-eager?
         if pending_transaction.all_signed() {
+            // TODO: emit both transactions as event
             self.pending_transactions.remove(&id);
         }
 
@@ -840,26 +861,13 @@ impl Contract {
     }
 }
 
-fn extract_transaction(
-    transaction_json: Option<TypedTransaction>,
-    transaction_rlp: Option<String>,
-) -> TypedTransaction {
-    transaction_json
-        .or_else(|| {
-            transaction_rlp.map(|rlp_hex| {
-                let rlp_bytes = hex::decode(rlp_hex)
-                    .unwrap_or_else(|_| env::panic_str("Error decoding `transaction_rlp` as hex"));
-                let rlp = Rlp::new(&rlp_bytes);
-                TypedTransaction::decode(&rlp).unwrap_or_else(|_| {
-                    env::panic_str("Error decoding `transaction_rlp` as transaction RLP")
-                })
-            })
-        })
-        .unwrap_or_else(|| {
-            env::panic_str(
-                "A transaction must be provided in `transaction_json` or `transaction_rlp`",
-            )
-        })
+fn decode_transaction_request(rlp_hex: &str) -> TransactionRequest {
+    let rlp_bytes = hex::decode(rlp_hex)
+        .unwrap_or_else(|_| env::panic_str("Error decoding `transaction_rlp` as hex"));
+    let rlp = Rlp::new(&rlp_bytes);
+    TransactionRequest::decode(&rlp).unwrap_or_else(|_| {
+        env::panic_str("Error decoding `transaction_rlp` as transaction request RLP")
+    })
 }
 
 register_custom_getrandom!(custom_getrandom);

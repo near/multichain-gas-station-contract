@@ -29,9 +29,9 @@ async fn test() {
         },
     );
 
-    println!("{:<20} {}", "Oracle:", oracle.id());
-    println!("{:<20} {}", "Signer:", signer.id());
-    println!("{:<20} {}", "Gas Station:", gas_station.id());
+    println!("{:<16} {}", "Oracle:", oracle.id());
+    println!("{:<16} {}", "Signer:", signer.id());
+    println!("{:<16} {}", "Gas Station:", gas_station.id());
 
     gas_station
         .batch()

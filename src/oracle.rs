@@ -4,22 +4,23 @@ use near_sdk::{
     json_types::{U128, U64},
     serde::{Deserialize, Serialize},
 };
+use schemars::JsonSchema;
 
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone, Copy)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, JsonSchema, Clone, Copy)]
 #[serde(crate = "near_sdk::serde")]
 pub struct Price {
     pub multiplier: U128,
     pub decimals: u8,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 pub struct AssetOptionalPrice {
     pub asset_id: String,
     pub price: Option<Price>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 pub struct PriceData {
     pub timestamp: U64,
