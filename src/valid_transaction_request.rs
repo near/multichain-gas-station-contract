@@ -23,7 +23,6 @@ use crate::foreign_address::ForeignAddress;
 )]
 #[serde(crate = "near_sdk::serde")]
 pub struct ValidTransactionRequest {
-    pub sender: ForeignAddress,
     pub receiver: ForeignAddress,
     pub gas: [u64; 4],
     pub gas_price: [u64; 4],
@@ -38,10 +37,6 @@ impl TryFrom<TransactionRequest> for ValidTransactionRequest {
 
     fn try_from(transaction: TransactionRequest) -> Result<Self, Self::Error> {
         Ok(Self {
-            sender: transaction
-                .from
-                .ok_or(TransactionValidationError::Missing("from"))?
-                .into(),
             receiver: transaction
                 .to
                 .ok_or(TransactionValidationError::Missing("to"))?
@@ -94,7 +89,7 @@ impl ValidTransactionRequest {
 impl From<ValidTransactionRequest> for TransactionRequest {
     fn from(transaction: ValidTransactionRequest) -> Self {
         Self {
-            from: Some(transaction.sender.into()),
+            from: None,
             to: Some(NameOrAddress::Address(transaction.receiver.into())),
             gas: Some(transaction.gas()),
             gas_price: Some(transaction.gas_price()),

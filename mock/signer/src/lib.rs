@@ -3,7 +3,7 @@ use near_multichain_gas_station_contract::signer_contract::{
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    near_bindgen, PromiseOrValue,
+    near_bindgen, PromiseOrValue, PublicKey,
 };
 
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug)]
@@ -19,5 +19,11 @@ impl SignerContract for Contract {
 
     fn state(&self) -> ProtocolContractState {
         todo!()
+    }
+
+    fn public_key(&self) -> PublicKey {
+        "secp256k1:qMoRgcoXai4mBPsdbHi1wfyxF9TdbPCF4qSDQTRP3TfescSRoUdSx6nmeQoN3aiwGzwMyGXAb1gUjBTv5AY8DXj"
+             .parse()
+             .unwrap()
     }
 }

@@ -1,8 +1,12 @@
 use ethers_core::{
+    k256::{
+        elliptic_curve::{group::GroupEncoding, sec1::{FromEncodedPoint, ToEncodedPoint}, },AffinePoint, EncodedPoint
+    },
     types::{transaction::eip2718::TypedTransaction, TransactionRequest, U256},
     utils::rlp::{Decodable, Rlp},
 };
 use getrandom::{register_custom_getrandom, Error};
+use kdf::get_mpc_address;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,
@@ -15,6 +19,11 @@ use near_sdk::{
 use near_sdk_contract_tools::{event, ft::ext_nep141, owner::*, standard::nep297::Event, Owner};
 use schemars::JsonSchema;
 
+pub mod foreign_address;
+use foreign_address::ForeignAddress;
+
+pub mod kdf;
+
 pub mod valid_transaction_request;
 use valid_transaction_request::ValidTransactionRequest;
 
@@ -26,9 +35,6 @@ use signer_contract::{ext_signer, MpcSignature};
 
 pub mod signature_request;
 use signature_request::{SignatureRequest, SignatureRequestStatus};
-
-pub mod foreign_address;
-use foreign_address::ForeignAddress;
 
 pub type ForeignChainTokenAmount = ethers_core::types::U256;
 
@@ -259,12 +265,13 @@ pub enum StorageKey {
 pub struct Contract {
     pub next_unique_id: u64,
     pub signer_contract_id: AccountId,
+    pub signer_contract_public_key: Option<near_sdk::PublicKey>,
     pub oracle_id: AccountId,
     pub oracle_local_asset_id: String,
     pub flags: Flags,
     pub expire_transaction_after_ns: u64, // TODO: Make configurable
     pub foreign_chains: UnorderedMap<u64, ForeignChainConfiguration>,
-    pub sender_whitelist: UnorderedSet<ForeignAddress>,
+    pub sender_whitelist: UnorderedSet<AccountId>,
     pub receiver_whitelist: UnorderedSet<ForeignAddress>,
     pub pending_transactions: UnorderedMap<u64, PendingTransaction>,
     pub collected_fees: UnorderedMap<AssetId, U128>,
@@ -281,6 +288,7 @@ impl Contract {
         let mut contract = Self {
             next_unique_id: 0,
             signer_contract_id,
+            signer_contract_public_key: None, // Loaded asynchronously
             oracle_id,
             oracle_local_asset_id,
             flags: Flags::default(),
@@ -294,10 +302,29 @@ impl Contract {
 
         Owner::init(&mut contract, &env::predecessor_account_id());
 
+        // Loads the signer_contract_public_key asynchronously
+        contract.refresh_signer_public_key();
+
         contract
     }
 
     // Public contract config getters/setters
+
+    pub fn refresh_signer_public_key(&mut self) -> Promise {
+        self.assert_owner();
+
+        ext_signer::ext(self.signer_contract_id.clone())
+            .public_key()
+            .then(Self::ext(env::current_account_id()).refresh_signer_public_key_callback())
+    }
+
+    #[private]
+    pub fn refresh_signer_public_key_callback(
+        &mut self,
+        #[callback_result] public_key: near_sdk::PublicKey,
+    ) {
+        self.signer_contract_public_key = Some(public_key);
+    }
 
     pub fn get_flags(&self) -> &Flags {
         &self.flags
@@ -331,18 +358,18 @@ impl Contract {
         self.receiver_whitelist.clear();
     }
 
-    pub fn get_sender_whitelist(&self) -> Vec<&ForeignAddress> {
+    pub fn get_sender_whitelist(&self) -> Vec<&AccountId> {
         self.sender_whitelist.iter().collect()
     }
 
-    pub fn add_to_sender_whitelist(&mut self, addresses: Vec<ForeignAddress>) {
+    pub fn add_to_sender_whitelist(&mut self, addresses: Vec<AccountId>) {
         self.assert_owner();
         for address in addresses {
             self.sender_whitelist.insert(address);
         }
     }
 
-    pub fn remove_from_sender_whitelist(&mut self, addresses: Vec<ForeignAddress>) {
+    pub fn remove_from_sender_whitelist(&mut self, addresses: Vec<AccountId>) {
         self.assert_owner();
         for address in addresses {
             self.sender_whitelist.remove(&address);
@@ -522,8 +549,6 @@ impl Contract {
             ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
                 .unwrap_or_else(|e| env::panic_str(&format!("Invalid transaction request: {e}")));
 
-        self.filter_transaction(&transaction);
-
         let foreign_chain_configuration = self
             .foreign_chains
             .get(&transaction.chain_id)
@@ -557,7 +582,7 @@ impl Contract {
         id
     }
 
-    fn filter_transaction(&self, transaction: &ValidTransactionRequest) {
+    fn filter_transaction(&self, sender_id: &AccountId, transaction: &ValidTransactionRequest) {
         // Check receiver whitelist
         if self.flags.is_receiver_whitelist_enabled {
             require!(
@@ -569,7 +594,7 @@ impl Contract {
         // Check sender whitelist
         if self.flags.is_sender_whitelist_enabled {
             require!(
-                self.sender_whitelist.contains(&transaction.sender),
+                self.sender_whitelist.contains(sender_id),
                 "Sender is not whitelisted",
             );
         }
@@ -607,7 +632,7 @@ impl Contract {
                 .unwrap_or_else(|e| env::panic_str(&format!("Invalid transaction request: {e}")));
 
         // Guarantees invariants required in callback
-        self.filter_transaction(&transaction);
+        self.filter_transaction(&env::predecessor_account_id(), &transaction);
 
         let use_paymaster = use_paymaster.unwrap_or(false);
 
@@ -695,10 +720,11 @@ impl Contract {
             .next_paymaster()
             .unwrap_or_else(|| env::panic_str("No paymasters found"));
 
+        // let p = get_mpc_address(self.signer_contract_public_key.unwrap(), &env::current_account_id(), predecessor.as_str());
+
         let paymaster_transaction = ValidTransactionRequest {
             chain_id: transaction_request.chain_id,
-            sender: paymaster.foreign_address,
-            receiver: transaction_request.sender,
+            receiver: todo!(),
             value: request_tokens_for_gas.0,
             gas: paymaster_transaction_gas.0,
             gas_price: gas_price.0,
@@ -858,6 +884,56 @@ fn decode_transaction_request(rlp_hex: &str) -> TransactionRequest {
     TransactionRequest::decode(&rlp).unwrap_or_else(|_| {
         env::panic_str("Error decoding `transaction_rlp` as transaction request RLP")
     })
+}
+
+#[test]
+fn test_keys() {
+    let public_key: near_sdk::PublicKey = "secp256k1:qMoRgcoXai4mBPsdbHi1wfyxF9TdbPCF4qSDQTRP3TfescSRoUdSx6nmeQoN3aiwGzwMyGXAb1gUjBTv5AY8DXj"
+        .parse()
+        .unwrap();
+
+    // uncompressed tag: 4
+
+    let mut bytes = public_key.into_bytes();
+    bytes[0] = 4;
+
+    let affine = ethers_core::k256::AffinePoint::from_bytes(public_key.as_bytes().into()).unwrap();
+
+    // let encoded = affine.to_encoded_point(false);
+
+    // println!("{}:::{:?}", public_key.as_bytes().len(), public_key.as_bytes());
+
+    // let encoded = EncodedPoint::from_bytes(bytes).unwrap();
+    // let encoded = EncodedPoint::try_from([0; 64]).unwrap();
+    // let affine = AffinePoint::from_encoded_point(&encoded).unwrap();
+
+    // println!("{:?}", affine);
+}
+
+#[test]
+fn test() {
+    let encoded = hex::encode(
+        TypedTransaction::Legacy(TransactionRequest {
+            from: Some(ForeignAddress([1; 20]).into()),
+            to: Some(ForeignAddress([1; 20]).into()),
+            gas: Some(U256::from(1000)),
+            gas_price: Some(U256::from(1000)),
+            value: Some(U256::zero()),
+            data: None,
+            nonce: Some(U256::from(17)),
+            chain_id: Some(0.into()),
+        })
+        .rlp(),
+    );
+
+    // as transaction req  : e1118203e88203e89401010101010101010101010101010101010101018080808080
+    // as typed transaction: e1118203e88203e89401010101010101010101010101010101010101018080808080
+
+    println!("{encoded}",);
+    let rlp_bytes = hex::decode(&encoded).unwrap();
+    let rlp = Rlp::new(&rlp_bytes);
+    let tx = TypedTransaction::decode(&rlp).unwrap();
+    println!("{tx:?}");
 }
 
 register_custom_getrandom!(custom_getrandom);

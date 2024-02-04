@@ -5,7 +5,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bytes = "1.5.0"
 ethers-core = "2.0.13"
 getrandom = { version = "0.2", features = [
     "custom",
@@ -13,8 +12,11 @@ getrandom = { version = "0.2", features = [
 hex = "0.4"
 near-sdk.workspace = true
 near-sdk-contract-tools = "2.1"
-schemars = { version = "0.8.16", features = ["bytes"] }
+schemars = "0.8.16"
 thiserror = "1"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+sha2 = "0.10.8"
 
 [dev-dependencies]
 near-workspaces = { version = "0.10", features = ["unstable"] }
@@ -30,7 +32,7 @@ lto = true
 opt-level = "z"
 overflow-checks = true
 panic = "abort"
-# strip = true
+strip = true
 
 [workspace]
 members = [".", "mock/*"]

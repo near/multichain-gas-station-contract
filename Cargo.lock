@@ -2221,7 +2221,6 @@ dependencies = [
 name = "near-multichain-gas-station-contract"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "ethers-core",
  "getrandom 0.2.12",
  "hex",
@@ -2229,6 +2228,7 @@ dependencies = [
  "near-sdk-contract-tools",
  "near-workspaces",
  "schemars",
+ "sha2",
  "thiserror",
  "tokio",
 ]
@@ -3541,7 +3541,6 @@ version = "0.8.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "45a28f4c49489add4ce10783f7911893516f15afe45d015608d41faca6bc4d29"
 dependencies = [
- "bytes",
  "dyn-clone",
  "schemars_derive",
  "serde",

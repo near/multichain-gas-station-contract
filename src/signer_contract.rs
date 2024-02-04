@@ -37,6 +37,7 @@ pub enum ProtocolContractState {
 pub trait SignerContract {
     fn sign(&mut self, payload: [u8; 32], path: &String) -> PromiseOrValue<MpcSignature>;
     fn state(&self) -> ProtocolContractState;
+    fn public_key(&self) -> near_sdk::PublicKey;
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
