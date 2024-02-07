@@ -14,7 +14,7 @@ struct Contract {}
 impl SignerContract for Contract {
     fn sign(&mut self, payload: [u8; 32], path: &String) -> PromiseOrValue<MpcSignature> {
         let _ = (payload, path);
-        PromiseOrValue::Value(MpcSignature::new([0; 32], [0; 32], 0))
+        PromiseOrValue::Value(MpcSignature::new([127; 32], [33; 32], 1))
     }
 
     fn state(&self) -> ProtocolContractState {
@@ -22,8 +22,8 @@ impl SignerContract for Contract {
     }
 
     fn public_key(&self) -> PublicKey {
-        "secp256k1:qMoRgcoXai4mBPsdbHi1wfyxF9TdbPCF4qSDQTRP3TfescSRoUdSx6nmeQoN3aiwGzwMyGXAb1gUjBTv5AY8DXj"
-             .parse()
-             .unwrap()
+        "secp256k1:37aFybhUHCxRdDkuCcB3yHzxqK7N8EQ745MujyAQohXSsYymVeHzhLxKvZ2qYeRHf3pGFiAsxqFJZjpF9gP2JV5u"
+            .parse()
+            .unwrap()
     }
 }

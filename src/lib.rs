@@ -1,12 +1,8 @@
 use ethers_core::{
-    k256::{
-        elliptic_curve::{group::GroupEncoding, sec1::{FromEncodedPoint, ToEncodedPoint}, },AffinePoint, EncodedPoint
-    },
     types::{transaction::eip2718::TypedTransaction, TransactionRequest, U256},
     utils::rlp::{Decodable, Rlp},
 };
 use getrandom::{register_custom_getrandom, Error};
-use kdf::get_mpc_address;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,
@@ -23,6 +19,7 @@ pub mod foreign_address;
 use foreign_address::ForeignAddress;
 
 pub mod kdf;
+use kdf::get_mpc_address;
 
 pub mod valid_transaction_request;
 use valid_transaction_request::ValidTransactionRequest;
@@ -303,7 +300,7 @@ impl Contract {
         Owner::init(&mut contract, &env::predecessor_account_id());
 
         // Loads the signer_contract_public_key asynchronously
-        contract.refresh_signer_public_key();
+        // contract.refresh_signer_public_key();
 
         contract
     }
@@ -321,8 +318,11 @@ impl Contract {
     #[private]
     pub fn refresh_signer_public_key_callback(
         &mut self,
-        #[callback_result] public_key: near_sdk::PublicKey,
+        #[callback_result] public_key: Result<near_sdk::PublicKey, PromiseError>,
     ) {
+        let public_key = public_key.unwrap_or_else(|_| {
+            env::panic_str("Failed to load signer public key from the signer contract")
+        });
         self.signer_contract_public_key = Some(public_key);
     }
 
@@ -720,11 +720,16 @@ impl Contract {
             .next_paymaster()
             .unwrap_or_else(|| env::panic_str("No paymasters found"));
 
-        // let p = get_mpc_address(self.signer_contract_public_key.unwrap(), &env::current_account_id(), predecessor.as_str());
+        let predecessor_foreign_address = get_mpc_address(
+            self.signer_contract_public_key.clone().unwrap(),
+            &env::current_account_id(),
+            predecessor.as_str(),
+        )
+        .unwrap_or_else(|e| env::panic_str(&format!("Failed to calculate MPC address: {e}")));
 
         let paymaster_transaction = ValidTransactionRequest {
             chain_id: transaction_request.chain_id,
-            receiver: todo!(),
+            receiver: predecessor_foreign_address,
             value: request_tokens_for_gas.0,
             gas: paymaster_transaction_gas.0,
             gas_price: gas_price.0,
@@ -803,9 +808,9 @@ impl Contract {
                 ))
             });
 
-        if !request.is_pending() {
+        if !request.is_in_flight() {
             env::panic_str(&format!(
-                "Signature request {id}.{index} has already been signed"
+                "Inconsistent state: Signature request {id}.{index} should be in-flight but is not"
             ));
         }
 
@@ -884,56 +889,6 @@ fn decode_transaction_request(rlp_hex: &str) -> TransactionRequest {
     TransactionRequest::decode(&rlp).unwrap_or_else(|_| {
         env::panic_str("Error decoding `transaction_rlp` as transaction request RLP")
     })
-}
-
-#[test]
-fn test_keys() {
-    let public_key: near_sdk::PublicKey = "secp256k1:qMoRgcoXai4mBPsdbHi1wfyxF9TdbPCF4qSDQTRP3TfescSRoUdSx6nmeQoN3aiwGzwMyGXAb1gUjBTv5AY8DXj"
-        .parse()
-        .unwrap();
-
-    // uncompressed tag: 4
-
-    let mut bytes = public_key.into_bytes();
-    bytes[0] = 4;
-
-    let affine = ethers_core::k256::AffinePoint::from_bytes(public_key.as_bytes().into()).unwrap();
-
-    // let encoded = affine.to_encoded_point(false);
-
-    // println!("{}:::{:?}", public_key.as_bytes().len(), public_key.as_bytes());
-
-    // let encoded = EncodedPoint::from_bytes(bytes).unwrap();
-    // let encoded = EncodedPoint::try_from([0; 64]).unwrap();
-    // let affine = AffinePoint::from_encoded_point(&encoded).unwrap();
-
-    // println!("{:?}", affine);
-}
-
-#[test]
-fn test() {
-    let encoded = hex::encode(
-        TypedTransaction::Legacy(TransactionRequest {
-            from: Some(ForeignAddress([1; 20]).into()),
-            to: Some(ForeignAddress([1; 20]).into()),
-            gas: Some(U256::from(1000)),
-            gas_price: Some(U256::from(1000)),
-            value: Some(U256::zero()),
-            data: None,
-            nonce: Some(U256::from(17)),
-            chain_id: Some(0.into()),
-        })
-        .rlp(),
-    );
-
-    // as transaction req  : e1118203e88203e89401010101010101010101010101010101010101018080808080
-    // as typed transaction: e1118203e88203e89401010101010101010101010101010101010101018080808080
-
-    println!("{encoded}",);
-    let rlp_bytes = hex::decode(&encoded).unwrap();
-    let rlp = Rlp::new(&rlp_bytes);
-    let tx = TypedTransaction::decode(&rlp).unwrap();
-    println!("{tx:?}");
 }
 
 register_custom_getrandom!(custom_getrandom);
