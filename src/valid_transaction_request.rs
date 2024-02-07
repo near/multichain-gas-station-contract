@@ -84,6 +84,11 @@ impl ValidTransactionRequest {
     pub fn chain_id(&self) -> U64 {
         U64([self.chain_id])
     }
+
+    /// Useful because TransactionRequest annoyingly has a local function called `from`.
+    pub fn into_typed_transaction(self) -> TypedTransaction {
+        <TransactionRequest as From<ValidTransactionRequest>>::from(self).into()
+    }
 }
 
 impl From<ValidTransactionRequest> for TransactionRequest {

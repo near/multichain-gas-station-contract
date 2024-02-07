@@ -36,29 +36,24 @@ use signature_request::{SignatureRequest, SignatureRequestStatus};
 pub type ForeignChainTokenAmount = ethers_core::types::U256;
 
 // TODO: Storage management
-// TODO: Events
 /// A successful request will emit two events, one for the request and one for
 /// the finalized transaction, in that order. The `id` field will be the same
 /// for both events.
 ///
 /// IDs are arbitrarily chosen by the contract. An ID is guaranteed to be unique
 /// within the contract.
-// #[event(version = "0.1.0", standard = "x-multichain-sig")]
-// pub enum ContractEvent {
-//     RequestTransactionSignature {
-//         xchain_id: String,
-//         sender_address: Option<XChainAddress>,
-//         unsigned_transaction: String,
-//         request_tokens_for_gas: Option<XChainTokenAmount>,
-//     },
-//     FinalizeTransactionSignature {
-//         xchain_id: String,
-//         sender_address: Option<XChainAddress>,
-//         signed_transaction: String,
-//         signed_paymaster_transaction: String,
-//         request_tokens_for_gas: Option<XChainTokenAmount>,
-//     },
-// }
+#[event(version = "0.1.0", standard = "x-multichain-sig")]
+pub enum ContractEvent {
+    TransactionSequenceCreated {
+        foreign_chain_id: String,
+        pending_transaction_sequence: PendingTransactionSequence,
+    },
+    TransactionSequenceSigned {
+        foreign_chain_id: String,
+        sender_local_address: AccountId,
+        signed_transactions: Vec<String>,
+    },
+}
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
@@ -231,14 +226,14 @@ impl AssetBalance {
 
 #[derive(Serialize, Deserialize, JsonSchema, BorshSerialize, BorshDeserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
-pub struct PendingTransaction {
-    pub sender_id: AccountId,
+pub struct PendingTransactionSequence {
+    pub created_by_id: AccountId,
     pub signature_requests: Vec<SignatureRequest>,
     pub created_at_block_timestamp_ns: U64,
     pub escrow: Option<AssetBalance>,
 }
 
-impl PendingTransaction {
+impl PendingTransactionSequence {
     pub fn all_signed(&self) -> bool {
         self.signature_requests
             .iter()
@@ -270,7 +265,7 @@ pub struct Contract {
     pub foreign_chains: UnorderedMap<u64, ForeignChainConfiguration>,
     pub sender_whitelist: UnorderedSet<AccountId>,
     pub receiver_whitelist: UnorderedSet<ForeignAddress>,
-    pub pending_transactions: UnorderedMap<u64, PendingTransaction>,
+    pub pending_transaction_sequences: UnorderedMap<u64, PendingTransactionSequence>,
     pub collected_fees: UnorderedMap<AssetId, U128>,
 }
 
@@ -293,14 +288,11 @@ impl Contract {
             foreign_chains: UnorderedMap::new(StorageKey::ForeignChains),
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
-            pending_transactions: UnorderedMap::new(StorageKey::PendingTransactions),
+            pending_transaction_sequences: UnorderedMap::new(StorageKey::PendingTransactions),
             collected_fees: UnorderedMap::new(StorageKey::CollectedFees),
         };
 
         Owner::init(&mut contract, &env::predecessor_account_id());
-
-        // Loads the signer_contract_public_key asynchronously
-        // contract.refresh_signer_public_key();
 
         contract
     }
@@ -506,8 +498,8 @@ impl Contract {
         &self,
         offset: Option<u32>,
         limit: Option<u32>,
-    ) -> std::collections::HashMap<String, &PendingTransaction> {
-        let mut v: Vec<_> = self.pending_transactions.iter().collect();
+    ) -> std::collections::HashMap<String, &PendingTransactionSequence> {
+        let mut v: Vec<_> = self.pending_transaction_sequences.iter().collect();
 
         v.sort_by_cached_key(|&(id, _)| *id);
 
@@ -518,8 +510,8 @@ impl Contract {
             .collect()
     }
 
-    pub fn get_transaction(&self, id: U64) -> Option<&PendingTransaction> {
-        self.pending_transactions.get(&id.0)
+    pub fn get_transaction(&self, id: U64) -> Option<&PendingTransactionSequence> {
+        self.pending_transaction_sequences.get(&id.0)
     }
 
     pub fn withdraw_collected_fees(&mut self, asset_id: AssetId, amount: Option<U128>) -> Promise {
@@ -602,13 +594,14 @@ impl Contract {
 
     fn insert_pending_transaction(
         &mut self,
-        pending_transaction: PendingTransaction,
+        pending_transaction: PendingTransactionSequence,
     ) -> TransactionCreation {
         let pending_signature_count = pending_transaction.signature_requests.len() as u32;
 
         let id = self.generate_unique_id();
 
-        self.pending_transactions.insert(id, pending_transaction);
+        self.pending_transaction_sequences
+            .insert(id, pending_transaction);
 
         TransactionCreation {
             id: id.into(),
@@ -661,19 +654,29 @@ impl Contract {
         } else {
             let predecessor = env::predecessor_account_id();
 
-            PromiseOrValue::Value(self.insert_pending_transaction(PendingTransaction {
+            let chain_id = transaction.chain_id;
+
+            let pending_transaction_sequence = PendingTransactionSequence {
                 signature_requests: vec![SignatureRequest::new(&predecessor, transaction)],
-                sender_id: predecessor,
+                created_by_id: predecessor,
                 created_at_block_timestamp_ns: env::block_timestamp().into(),
                 escrow: None,
-            }))
+            };
+
+            ContractEvent::TransactionSequenceCreated {
+                foreign_chain_id: chain_id.to_string(),
+                pending_transaction_sequence: pending_transaction_sequence.clone(),
+            }
+            .emit();
+
+            PromiseOrValue::Value(self.insert_pending_transaction(pending_transaction_sequence))
         }
     }
 
     #[private]
     pub fn create_transaction_callback(
         &mut self,
-        #[serializer(borsh)] predecessor: AccountId,
+        #[serializer(borsh)] sender: AccountId,
         #[serializer(borsh)] deposit: near_sdk::json_types::U128,
         #[serializer(borsh)] transaction_request: ValidTransactionRequest,
         #[callback_result] result: Result<PriceData, PromiseError>,
@@ -712,7 +715,7 @@ impl Contract {
             Some(0) => {} // No refund; payment is exact.
             Some(refund) => {
                 // Refund excess
-                Promise::new(predecessor.clone()).transfer(refund);
+                Promise::new(sender.clone()).transfer(refund);
             }
         }
 
@@ -720,16 +723,18 @@ impl Contract {
             .next_paymaster()
             .unwrap_or_else(|| env::panic_str("No paymasters found"));
 
-        let predecessor_foreign_address = get_mpc_address(
+        let sender_foreign_address = get_mpc_address(
             self.signer_contract_public_key.clone().unwrap(),
             &env::current_account_id(),
-            predecessor.as_str(),
+            sender.as_str(),
         )
         .unwrap_or_else(|e| env::panic_str(&format!("Failed to calculate MPC address: {e}")));
 
+        let chain_id = transaction_request.chain_id;
+
         let paymaster_transaction = ValidTransactionRequest {
-            chain_id: transaction_request.chain_id,
-            receiver: predecessor_foreign_address,
+            chain_id,
+            receiver: sender_foreign_address,
             value: request_tokens_for_gas.0,
             gas: paymaster_transaction_gas.0,
             gas_price: gas_price.0,
@@ -739,29 +744,46 @@ impl Contract {
 
         let signature_requests = vec![
             SignatureRequest::new(&paymaster.key_path, paymaster_transaction),
-            SignatureRequest::new(&predecessor, transaction_request),
+            SignatureRequest::new(&sender, transaction_request.clone()),
         ];
 
-        self.insert_pending_transaction(PendingTransaction {
+        let pending_transaction_sequence = PendingTransactionSequence {
             signature_requests,
-            sender_id: predecessor,
+            created_by_id: sender,
             created_at_block_timestamp_ns: env::block_timestamp().into(),
             escrow: Some(AssetBalance::native(fee)),
-        })
+        };
+
+        ContractEvent::TransactionSequenceCreated {
+            foreign_chain_id: chain_id.to_string(),
+            pending_transaction_sequence: pending_transaction_sequence.clone(),
+        }
+        .emit();
+
+        self.insert_pending_transaction(pending_transaction_sequence)
     }
 
     pub fn sign_next(&mut self, id: U64) -> Promise {
         let id = id.0;
 
-        let transaction = self.pending_transactions.get_mut(&id).unwrap_or_else(|| {
-            env::panic_str(&format!("Transaction signature request {id} not found"))
-        });
+        let transaction = self
+            .pending_transaction_sequences
+            .get_mut(&id)
+            .unwrap_or_else(|| {
+                env::panic_str(&format!("Transaction signature request {id} not found"))
+            });
 
         // ensure not expired
         require!(
             env::block_timestamp()
                 <= self.expire_transaction_after_ns + transaction.created_at_block_timestamp_ns.0,
             "Transaction is expired",
+        );
+
+        // ensure only signed by original creator
+        require!(
+            transaction.created_by_id == env::predecessor_account_id(),
+            "Predecessor must be the transaction creator",
         );
 
         let (index, next_signature_request) = transaction
@@ -794,12 +816,12 @@ impl Contract {
     ) -> String {
         let id = id.0;
 
-        let pending_transaction = self
-            .pending_transactions
+        let pending_transaction_sequence = self
+            .pending_transaction_sequences
             .get_mut(&id)
             .unwrap_or_else(|| env::panic_str(&format!("Pending transaction {id} not found")));
 
-        let request = pending_transaction
+        let request = pending_transaction_sequence
             .signature_requests
             .get_mut(index as usize)
             .unwrap_or_else(|| {
@@ -828,7 +850,7 @@ impl Contract {
 
         // Remove escrow from record.
         // This is important to ensuring that refund logic works correctly.
-        if let Some(escrow) = pending_transaction.escrow.take() {
+        if let Some(escrow) = pending_transaction_sequence.escrow.take() {
             let collected_fees = self
                 .collected_fees
                 .entry(escrow.asset_id.clone())
@@ -836,11 +858,33 @@ impl Contract {
             collected_fees.0 += escrow.amount.0;
         }
 
-        // Remove transaction if all requests have been signed
-        // TODO: Is this over-eager?
-        if pending_transaction.all_signed() {
-            // TODO: emit both transactions as event
-            self.pending_transactions.remove(&id);
+        let chain_id = request.transaction.chain_id;
+
+        let all_signatures = pending_transaction_sequence
+            .signature_requests
+            .iter()
+            .try_fold(vec![], |mut v, r| {
+                if let SignatureRequestStatus::Signed { signature } = &r.status {
+                    v.push((r.transaction.clone(), signature.clone()));
+                    Some(v)
+                } else {
+                    None
+                }
+            });
+
+        if let Some(all_signatures) = all_signatures {
+            ContractEvent::TransactionSequenceSigned {
+                foreign_chain_id: chain_id.to_string(),
+                sender_local_address: pending_transaction_sequence.created_by_id.clone(),
+                signed_transactions: all_signatures
+                    .into_iter()
+                    .map(|(t, s)| hex::encode(t.into_typed_transaction().rlp_signed(&s.into())))
+                    .collect(),
+            }
+            .emit();
+            // Remove transaction if all requests have been signed
+            // TODO: Is this over-eager?
+            self.pending_transaction_sequences.remove(&id);
         }
 
         hex::encode(&rlp_signed)
@@ -848,12 +892,12 @@ impl Contract {
 
     pub fn remove_transaction(&mut self, id: U64) -> PromiseOrValue<()> {
         let transaction = self
-            .pending_transactions
+            .pending_transaction_sequences
             .get(&id.0)
             .unwrap_or_else(|| env::panic_str("Transaction not found"));
 
         require!(
-            transaction.sender_id == env::predecessor_account_id(),
+            transaction.created_by_id == env::predecessor_account_id(),
             "Unauthorized"
         );
 
@@ -871,12 +915,12 @@ impl Contract {
                 PromiseOrValue::Promise(
                     escrow
                         .asset_id
-                        .transfer(transaction.sender_id.clone(), escrow.amount),
+                        .transfer(transaction.created_by_id.clone(), escrow.amount),
                 )
             })
             .unwrap_or(PromiseOrValue::Value(()));
 
-        self.pending_transactions.remove(&id.0);
+        self.pending_transaction_sequences.remove(&id.0);
 
         ret
     }
