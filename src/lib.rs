@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use ethers_core::{
     types::{transaction::eip2718::TypedTransaction, TransactionRequest, U256},
     utils::rlp::{Decodable, Rlp},
@@ -110,7 +112,6 @@ pub struct TransactionCreation {
 )]
 #[serde(crate = "near_sdk::serde")]
 pub struct PaymasterConfiguration {
-    pub foreign_address: ForeignAddress,
     pub nonce: u32,
     pub key_path: String,
 }
@@ -271,6 +272,33 @@ pub struct Contract {
 
 #[near_bindgen]
 impl Contract {
+    #[cfg(feature = "new_debug")]
+    #[init(ignore_state)]
+    pub fn new_debug(
+        signer_contract_id: AccountId,
+        oracle_id: AccountId,
+        oracle_local_asset_id: String,
+    ) -> Self {
+        let mut contract = Self {
+            next_unique_id: 0,
+            signer_contract_id,
+            signer_contract_public_key: None, // Loaded asynchronously
+            oracle_id,
+            oracle_local_asset_id,
+            flags: Flags::default(),
+            expire_transaction_after_ns: 5 * 60 * 1_000_000_000, // 5 minutes
+            foreign_chains: UnorderedMap::new(StorageKey::ForeignChains),
+            sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
+            receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
+            pending_transaction_sequences: UnorderedMap::new(StorageKey::PendingTransactions),
+            collected_fees: UnorderedMap::new(StorageKey::CollectedFees),
+        };
+
+        Owner::update_owner(&mut contract, Some(env::predecessor_account_id()));
+
+        contract
+    }
+
     #[init]
     pub fn new(
         signer_contract_id: AccountId,
@@ -429,14 +457,14 @@ impl Contract {
             .collect()
     }
 
-    pub fn add_paymaster(
-        &mut self,
-        chain_id: U64,
-        foreign_address: ForeignAddress,
-        nonce: u32,
-        key_path: String,
-    ) -> u32 {
+    pub fn add_paymaster(&mut self, chain_id: U64, nonce: u32, key_path: String) -> u32 {
         self.assert_owner();
+
+        require!(
+            AccountId::from_str(&key_path).is_err(),
+            "Paymaster key path must not be a valid account id",
+        );
+
         let chain = self
             .foreign_chains
             .get_mut(&chain_id.0)
@@ -444,11 +472,9 @@ impl Contract {
 
         let index = chain.paymasters.len();
 
-        chain.paymasters.push(PaymasterConfiguration {
-            foreign_address,
-            nonce,
-            key_path,
-        });
+        chain
+            .paymasters
+            .push(PaymasterConfiguration { nonce, key_path });
 
         index
     }
@@ -724,7 +750,9 @@ impl Contract {
             .unwrap_or_else(|| env::panic_str("No paymasters found"));
 
         let sender_foreign_address = get_mpc_address(
-            self.signer_contract_public_key.clone().unwrap(),
+            self.signer_contract_public_key.clone().unwrap_or_else(|| {
+                env::panic_str("The signer contract public key must be refreshed by calling `refresh_signer_public_key`")
+            }),
             &env::current_account_id(),
             sender.as_str(),
         )

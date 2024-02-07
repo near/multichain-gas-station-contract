@@ -82,7 +82,6 @@ async fn test() {
     assert_eq!(
         result,
         vec![PaymasterConfiguration {
-            foreign_address: ForeignAddress([0; 20]),
             nonce: 0,
             key_path: "$".to_string()
         }]
@@ -154,4 +153,21 @@ async fn test() {
         .unwrap();
 
     println!("Second signed transaction: {signed_tx_2:?}");
+}
+
+#[test]
+#[ignore = "generate a payload signable by the contract"]
+fn generate_eth_rlp_hex() {
+    let eth_transaction = ethers_core::types::TransactionRequest {
+        chain_id: Some(0.into()),
+        from: None,
+        to: Some(ForeignAddress([1; 20]).into()),
+        data: None,
+        gas: Some(21000.into()),
+        gas_price: Some(120.into()),
+        value: Some(100.into()),
+        nonce: Some(0.into()),
+    };
+
+    println!("{}", hex::encode(eth_transaction.rlp()));
 }

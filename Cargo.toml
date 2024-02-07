@@ -15,6 +15,13 @@ near-sdk-contract-tools = "2.1"
 schemars = "0.8.16"
 thiserror = "1"
 
+[features]
+default = []
+
+# enables the function new_debug() which overwrites the previously initialized state.
+# NOT SAFE FOR PRODUCTION USE
+new_debug = []
+
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 sha2 = "0.10.8"
 
