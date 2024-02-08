@@ -18,9 +18,9 @@ thiserror = "1"
 [features]
 default = []
 
-# enables the function new_debug() which overwrites the previously initialized state.
+# enables functions only for testing purposes
 # NOT SAFE FOR PRODUCTION USE
-new_debug = []
+debug = []
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 sha2 = "0.10.8"

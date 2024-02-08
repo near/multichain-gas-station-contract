@@ -1,7 +1,9 @@
 // NOTE: If tests fail due to a directory not existing error, create `target/near/{oracle,signer}`
 
+use ethers_core::{types::TransactionRequest, utils::rlp::Rlp};
 use near_multichain_gas_station_contract::{
-    foreign_address::ForeignAddress, PaymasterConfiguration, TransactionCreation,
+    chain_configuration::PaymasterConfiguration, foreign_address::ForeignAddress,
+    TransactionCreation,
 };
 use near_sdk::serde_json::json;
 use near_workspaces::{
@@ -58,7 +60,6 @@ async fn test() {
         })))
         .call(Function::new("add_paymaster").args_json(json!({
             "chain_id": "0",
-            "foreign_address": "0x0000000000000000000000000000000000000000",
             "nonce": 0,
             "key_path": "$",
         })))
@@ -170,4 +171,17 @@ fn generate_eth_rlp_hex() {
     };
 
     println!("{}", hex::encode(eth_transaction.rlp()));
+}
+
+#[test]
+fn decode_python_rlp() {
+    let python_bytes = hex::decode(
+        "eb80851bf08eb000825208947b965bdb7f0464843572eb2b8c17bdf27b720b14872386f26fc1000080808080",
+    )
+    .unwrap();
+    let python_rlp = Rlp::new(&python_bytes);
+
+    let txrq = TransactionRequest::decode_unsigned_rlp(&python_rlp).unwrap();
+
+    println!("{txrq:?}");
 }
