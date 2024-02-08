@@ -20,8 +20,6 @@ pub struct StorageEntry {
 #[near_bindgen]
 impl Contract {
     pub fn clear_storage(&mut self, entries: Vec<StorageEntry>) {
-        self.assert_owner();
-
         for entry in entries {
             env::storage_remove(&entry.key.0);
         }
