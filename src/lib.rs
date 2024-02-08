@@ -2,7 +2,6 @@ use ethers_core::{
     types::{transaction::eip2718::TypedTransaction, TransactionRequest, U256},
     utils::rlp::{Decodable, Rlp},
 };
-use getrandom::{register_custom_getrandom, Error};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,
@@ -21,8 +20,8 @@ use asset::{AssetBalance, AssetId};
 pub mod chain_configuration;
 use chain_configuration::ChainConfiguration;
 
-pub mod event;
-use event::ContractEvent;
+pub mod contract_event;
+use contract_event::ContractEvent;
 
 pub mod foreign_address;
 use foreign_address::ForeignAddress;
@@ -45,7 +44,7 @@ pub mod signer_contract;
 use signer_contract::{ext_signer, MpcSignature};
 
 pub mod signature_request;
-use signature_request::{SignatureRequest, SignatureRequestStatus};
+use signature_request::{SignatureRequest, Status};
 
 const DEFAULT_EXPIRE_SEQUENCE_IN_NS: u64 = 5 * 60 * 1_000_000_000; // 5 minutes
 
@@ -137,6 +136,7 @@ pub struct Contract {
     pub collected_fees: UnorderedMap<AssetId, U128>,
 }
 
+#[allow(clippy::needless_pass_by_value)]
 #[near_bindgen]
 impl Contract {
     #[init]
@@ -154,8 +154,7 @@ impl Contract {
             oracle_local_asset_id,
             flags: Flags::default(),
             expire_sequence_after_ns: expire_sequence_after_ns
-                .map(u64::from)
-                .unwrap_or(DEFAULT_EXPIRE_SEQUENCE_IN_NS),
+                .map_or(DEFAULT_EXPIRE_SEQUENCE_IN_NS, u64::from),
             foreign_chains: UnorderedMap::new(StorageKey::ForeignChains),
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
@@ -200,6 +199,7 @@ impl Contract {
         &mut self,
         pending_transaction: PendingTransactionSequence,
     ) -> TransactionCreation {
+        #[allow(clippy::cast_possible_truncation)]
         let pending_signature_count = pending_transaction.signature_requests.len() as u32;
 
         let id = self.generate_unique_id();
@@ -399,8 +399,9 @@ impl Contract {
             .find(|(_, r)| r.is_pending())
             .unwrap_or_else(|| env::panic_str("No pending or non-in-flight signature requests"));
 
-        next_signature_request.status = SignatureRequestStatus::InFlight;
+        next_signature_request.status = Status::InFlight;
 
+        #[allow(clippy::cast_possible_truncation)]
         ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
             .sign(
                 <TypedTransaction as From<ValidTransactionRequest>>::from(
@@ -470,7 +471,7 @@ impl Contract {
             .signature_requests
             .iter()
             .try_fold(vec![], |mut v, r| {
-                if let SignatureRequestStatus::Signed { signature } = &r.status {
+                if let Status::Signed { signature } = &r.status {
                     v.push((r.transaction.clone(), signature.clone()));
                     Some(v)
                 } else {
@@ -517,14 +518,13 @@ impl Contract {
         let ret = transaction
             .escrow
             .as_ref()
-            .map(|escrow| {
+            .map_or(PromiseOrValue::Value(()), |escrow| {
                 PromiseOrValue::Promise(
                     escrow
                         .asset_id
                         .transfer(transaction.created_by_id.clone(), escrow.amount),
                 )
-            })
-            .unwrap_or(PromiseOrValue::Value(()));
+            });
 
         self.pending_transaction_sequences.remove(&id.0);
 
@@ -541,9 +541,17 @@ fn decode_transaction_request(rlp_hex: &str) -> TransactionRequest {
     })
 }
 
-register_custom_getrandom!(custom_getrandom);
+mod custom_getrandom {
+    #![allow(clippy::no_mangle_with_rust_abi)]
 
-pub fn custom_getrandom(buf: &mut [u8]) -> Result<(), Error> {
-    buf.copy_from_slice(&env::random_seed_array());
-    Ok(())
+    use getrandom::{register_custom_getrandom, Error};
+    use near_sdk::env;
+
+    register_custom_getrandom!(custom_getrandom);
+
+    #[allow(clippy::unnecessary_wraps)]
+    pub fn custom_getrandom(buf: &mut [u8]) -> Result<(), Error> {
+        buf.copy_from_slice(&env::random_seed_array());
+        Ok(())
+    }
 }

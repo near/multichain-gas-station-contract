@@ -34,6 +34,7 @@ pub trait Oracle {
     fn get_price_data(&self, asset_ids: Option<Vec<String>>) -> PriceData;
 }
 
+#[must_use]
 pub fn process_oracle_result(
     local_asset_id: &str,
     foreign_asset_id: &str,

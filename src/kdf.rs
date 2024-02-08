@@ -2,7 +2,7 @@
 
 use ethers_core::k256::{
     elliptic_curve::{
-        scalar::*,
+        scalar::FromUintUnchecked,
         sec1::{FromEncodedPoint, Tag, ToEncodedPoint},
         CurveArithmetic,
     },
@@ -41,15 +41,18 @@ fn sha256(bytes: &[u8]) -> Vec<u8> {
 // near-mpc-recovery with key derivation protocol vX.Y.Z.
 const EPSILON_DERIVATION_PREFIX: &str = "near-mpc-recovery v0.1.0 epsilon derivation:";
 
+#[must_use]
 pub fn derive_epsilon(signer_id: &AccountId, path: &str) -> Scalar {
-    let derivation_path = format!("{EPSILON_DERIVATION_PREFIX}{},{}", signer_id, path);
+    let derivation_path = format!("{EPSILON_DERIVATION_PREFIX}{signer_id},{path}");
     Scalar::from_bytes(&sha256(derivation_path.as_bytes()))
 }
 
+#[must_use]
 pub fn derive_key(public_key: PublicKey, epsilon: Scalar) -> PublicKey {
     (<Secp256k1 as CurveArithmetic>::ProjectivePoint::GENERATOR * epsilon + public_key).to_affine()
 }
 
+#[must_use]
 pub fn derive_key_for_account(
     mpc_public_key: PublicKey,
     account_id: &AccountId,
@@ -71,6 +74,11 @@ pub enum PublicKeyConversionError {
     InvalidKeyData,
 }
 
+/// Converts an SECP256K1-variant [`near_sdk::PublicKey`] to an [`AffinePoint`].
+///
+/// # Errors
+///
+/// Returns an error if the public key is not a valid SECP256K1 key.
 pub fn near_public_key_to_affine(
     public_key: near_sdk::PublicKey,
 ) -> Result<AffinePoint, PublicKeyConversionError> {
@@ -95,6 +103,11 @@ pub fn near_public_key_to_affine(
     affine.ok_or(PublicKeyConversionError::InvalidKeyData)
 }
 
+/// Calculates the public key of the MPC signer for the given account ID and derivation path.
+///
+/// # Errors
+///
+/// Returns an error if the public key is not a valid SECP256K1 key.
 pub fn get_mpc_address(
     mpc_public_key: near_sdk::PublicKey,
     account_id: &AccountId,

@@ -69,23 +69,33 @@ impl TryFrom<TransactionRequest> for ValidTransactionRequest {
 }
 
 impl ValidTransactionRequest {
+    #[must_use]
     pub fn gas(&self) -> U256 {
         U256(self.gas)
     }
+
+    #[must_use]
     pub fn gas_price(&self) -> U256 {
         U256(self.gas_price)
     }
+
+    #[must_use]
     pub fn value(&self) -> U256 {
         U256(self.value)
     }
+
+    #[must_use]
     pub fn nonce(&self) -> U256 {
         U256(self.nonce)
     }
+
+    #[must_use]
     pub fn chain_id(&self) -> U64 {
         U64([self.chain_id])
     }
 
-    /// Useful because TransactionRequest annoyingly has a local function called `from`.
+    /// Useful because `TransactionRequest` annoyingly has a local function called `from`.
+    #[must_use]
     pub fn into_typed_transaction(self) -> TypedTransaction {
         <TransactionRequest as From<ValidTransactionRequest>>::from(self).into()
     }

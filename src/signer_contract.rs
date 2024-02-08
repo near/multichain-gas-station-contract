@@ -45,6 +45,7 @@ pub trait SignerContract {
 pub struct MpcSignature(String, String);
 
 impl MpcSignature {
+    #[must_use]
     pub fn new(r: [u8; 32], s: [u8; 32], v: u8) -> Self {
         let mut big_r = [0u8; 33];
         big_r[0] = v;

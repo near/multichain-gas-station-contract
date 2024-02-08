@@ -9,7 +9,7 @@ use crate::PendingTransactionSequence;
 ///
 /// IDs are arbitrarily chosen by the contract. An ID is guaranteed to be unique
 /// within the contract.
-#[event(version = "0.1.0", standard = "x-multichain-sig")]
+#[event(version = "0.1.0", standard = "x-gas-station")]
 pub enum ContractEvent {
     TransactionSequenceCreated {
         foreign_chain_id: String,

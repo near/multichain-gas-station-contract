@@ -21,6 +21,7 @@ use crate::{
     Contract, ContractExt, Flags, GetForeignChain, PendingTransactionSequence, StorageKey,
 };
 
+#[allow(clippy::needless_pass_by_value)]
 #[near_bindgen]
 impl Contract {
     pub fn get_expire_sequence_after_ns(&self) -> U64 {

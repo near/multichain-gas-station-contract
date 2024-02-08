@@ -32,6 +32,9 @@ impl From<ethers_core::types::Signature> for SignatureBorsh {
         signature.r.to_big_endian(&mut r);
         let mut s = [0u8; 32];
         signature.s.to_big_endian(&mut s);
+
+        // permissible due to the runtime guarantees provided by the `Signature` type
+        #[allow(clippy::cast_possible_truncation)]
         let v = signature.v as u8;
         Self { r, s, v }
     }
@@ -42,7 +45,7 @@ impl From<SignatureBorsh> for ethers_core::types::Signature {
         ethers_core::types::Signature {
             r: U256::from_big_endian(&signature.r),
             s: U256::from_big_endian(&signature.s),
-            v: signature.v as u64,
+            v: u64::from(signature.v),
         }
     }
 }
@@ -59,7 +62,7 @@ impl From<SignatureBorsh> for ethers_core::types::Signature {
     Eq,
 )]
 #[serde(crate = "near_sdk::serde")]
-pub enum SignatureRequestStatus {
+pub enum Status {
     Pending,
     InFlight,
     Signed { signature: SignatureBorsh },
@@ -78,7 +81,7 @@ pub enum SignatureRequestStatus {
 )]
 #[serde(crate = "near_sdk::serde")]
 pub struct SignatureRequest {
-    pub status: SignatureRequestStatus,
+    pub status: Status,
     pub key_path: String,
     pub transaction: ValidTransactionRequest,
 }
@@ -86,26 +89,29 @@ pub struct SignatureRequest {
 impl SignatureRequest {
     pub fn new(key_path: &impl ToString, transaction: ValidTransactionRequest) -> Self {
         Self {
-            status: SignatureRequestStatus::Pending,
+            status: Status::Pending,
             key_path: key_path.to_string(),
             transaction,
         }
     }
 
+    #[must_use]
     pub const fn is_pending(&self) -> bool {
-        matches!(self.status, SignatureRequestStatus::Pending { .. })
+        matches!(self.status, Status::Pending { .. })
     }
 
+    #[must_use]
     pub const fn is_in_flight(&self) -> bool {
-        matches!(self.status, SignatureRequestStatus::InFlight { .. })
+        matches!(self.status, Status::InFlight { .. })
     }
 
+    #[must_use]
     pub const fn is_signed(&self) -> bool {
-        matches!(self.status, SignatureRequestStatus::Signed { .. })
+        matches!(self.status, Status::Signed { .. })
     }
 
     pub fn set_signature(&mut self, signature: impl Into<SignatureBorsh>) {
-        self.status = SignatureRequestStatus::Signed {
+        self.status = Status::Signed {
             signature: signature.into(),
         };
     }
