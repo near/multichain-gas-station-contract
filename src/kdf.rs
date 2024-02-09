@@ -103,6 +103,7 @@ pub fn near_public_key_to_affine(
     affine.ok_or(PublicKeyConversionError::InvalidKeyData)
 }
 
+/// TODO: The value returned by this function conflicts with that recovered from signatures. Requires further investigation.
 /// Calculates the public key of the MPC signer for the given account ID and derivation path.
 ///
 /// # Errors
@@ -110,22 +111,23 @@ pub fn near_public_key_to_affine(
 /// Returns an error if the public key is not a valid SECP256K1 key.
 pub fn get_mpc_address(
     mpc_public_key: near_sdk::PublicKey,
-    account_id: &AccountId,
-    path: &str,
+    gas_station_account_id: &AccountId,
+    caller_account_id: &str,
 ) -> Result<ForeignAddress, PublicKeyConversionError> {
     let affine = near_public_key_to_affine(mpc_public_key)?;
-    Ok(derive_key_for_account(affine, account_id, path).into())
+    Ok(derive_key_for_account(affine, gas_station_account_id, caller_account_id).into())
 }
 
 #[test]
 fn test_keys() {
-    let public_key: near_sdk::PublicKey = "secp256k1:37aFybhUHCxRdDkuCcB3yHzxqK7N8EQ745MujyAQohXSsYymVeHzhLxKvZ2qYeRHf3pGFiAsxqFJZjpF9gP2JV5u"
+    let public_key: near_sdk::PublicKey = "secp256k1:47xve2ymatpG4x4Gp7pmYwuLJk7eeRegrFuS4VoW5VV4i3GsBiBY87vkH6UZiiY18NeZnkBzcZzipDbJJ5pmjTcc"
         .parse()
         .unwrap();
 
     let a = near_public_key_to_affine(public_key.clone()).unwrap();
 
-    let mpc_address = derive_key_for_account(a, &"alice.near".parse().unwrap(), "");
+    let mpc_address =
+        derive_key_for_account(a, &"canhazgas.testnet".parse().unwrap(), "hatchet.testnet");
 
     println!("{}", ethers_core::utils::to_checksum(&mpc_address, None));
 }

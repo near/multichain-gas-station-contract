@@ -15,6 +15,7 @@ use crate::{
     chain_configuration::{ChainConfiguration, PaymasterConfiguration},
     decode_transaction_request,
     foreign_address::ForeignAddress,
+    kdf::get_mpc_address,
     oracle::PriceData,
     signer_contract::ext_signer,
     valid_transaction_request::ValidTransactionRequest,
@@ -281,6 +282,15 @@ impl Contract {
 
     pub fn get_collected_fees(&self) -> std::collections::HashMap<&AssetId, &U128> {
         self.collected_fees.iter().collect()
+    }
+
+    pub fn get_foreign_address_for(&self, account_id: AccountId) -> ForeignAddress {
+        get_mpc_address(
+            self.signer_contract_public_key.clone().unwrap(),
+            &env::current_account_id(),
+            account_id.as_str(),
+        )
+        .unwrap()
     }
 
     pub fn estimate_gas_cost(&self, transaction_rlp_hex: String, price_data: PriceData) -> U128 {

@@ -1,3 +1,10 @@
+use ethers_core::k256::{
+    ecdsa::RecoveryId,
+    elliptic_curve::{
+        bigint::Uint, group::GroupEncoding, ops::Reduce, point::AffineCoordinates, PrimeField,
+    },
+    AffinePoint,
+};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     ext_contract,
@@ -6,6 +13,8 @@ use near_sdk::{
 };
 use schemars::JsonSchema;
 use thiserror::Error;
+
+use crate::kdf::ScalarExt;
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
 #[serde(crate = "near_sdk::serde")]
@@ -42,7 +51,7 @@ pub trait SignerContract {
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
-pub struct MpcSignature(String, String);
+pub struct MpcSignature(pub String, pub String);
 
 impl MpcSignature {
     #[must_use]
@@ -59,34 +68,29 @@ impl MpcSignature {
 pub enum MpcSignatureDecodeError {
     #[error("Hex decoding error")]
     Hex(#[from] hex::FromHexError),
-    #[error("Invalid length")]
-    InvalidLength,
+    #[error("Invalid signature data")]
+    InvalidSignatureData,
 }
 
 impl TryFrom<MpcSignature> for ethers_core::types::Signature {
     type Error = MpcSignatureDecodeError;
 
     fn try_from(MpcSignature(big_r_hex, s_hex): MpcSignature) -> Result<Self, Self::Error> {
-        let s_bytes = hex::decode(s_hex)?;
-        let s: &[u8; 32] = s_bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| MpcSignatureDecodeError::InvalidLength)?;
+        let big_r = Option::<AffinePoint>::from(AffinePoint::from_bytes(
+            hex::decode(big_r_hex)?[..].into(),
+        ))
+        .ok_or(MpcSignatureDecodeError::InvalidSignatureData)?;
+        let s = ethers_core::k256::Scalar::from_bytes(&hex::decode(s_hex)?);
 
-        let big_r_bytes = hex::decode(big_r_hex)?;
-        let (v, r) = match &big_r_bytes[..] {
-            [v, r @ ..] => (*v, r),
-            _ => return Err(MpcSignatureDecodeError::InvalidLength),
-        };
+        let r = <ethers_core::k256::Scalar as Reduce<Uint<4>>>::reduce_bytes(&big_r.x());
+        let x_is_reduced = r.to_repr() != big_r.x();
 
-        let r: &[u8; 32] = r
-            .try_into()
-            .map_err(|_| MpcSignatureDecodeError::InvalidLength)?;
+        let v = RecoveryId::new(big_r.y_is_odd().into(), x_is_reduced);
 
         Ok(ethers_core::types::Signature {
-            r: r.into(),
-            s: s.into(),
-            v: v.into(),
+            r: r.to_bytes().as_slice().into(),
+            s: s.to_bytes().as_slice().into(),
+            v: v.to_byte().into(),
         })
     }
 }
