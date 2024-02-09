@@ -262,7 +262,12 @@ impl Contract {
         self.pending_transaction_sequences.get(&id.0)
     }
 
-    pub fn withdraw_collected_fees(&mut self, asset_id: AssetId, amount: Option<U128>) -> Promise {
+    pub fn withdraw_collected_fees(
+        &mut self,
+        asset_id: AssetId,
+        amount: Option<U128>,
+        receiver_id: Option<AccountId>, // TODO: Pull method instead of push (danger of typos/locked accounts)
+    ) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_owner();
         let fees = self
@@ -277,7 +282,10 @@ impl Contract {
             .checked_sub(amount.0)
             .unwrap_or_else(|| env::panic_str("Not enough fees to withdraw"));
 
-        asset_id.transfer(self.own_get_owner().unwrap(), amount)
+        asset_id.transfer(
+            receiver_id.unwrap_or_else(|| self.own_get_owner().unwrap()),
+            amount,
+        )
     }
 
     pub fn get_collected_fees(&self) -> std::collections::HashMap<&AssetId, &U128> {
