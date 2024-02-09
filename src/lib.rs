@@ -11,6 +11,7 @@ use near_sdk::{
     store::{UnorderedMap, UnorderedSet},
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
+#[allow(clippy::wildcard_imports)]
 use near_sdk_contract_tools::{owner::*, standard::nep297::Event, Owner};
 use schemars::JsonSchema;
 

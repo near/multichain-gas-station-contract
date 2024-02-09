@@ -1,9 +1,10 @@
 use ethers_core::k256::{
+    self,
     ecdsa::RecoveryId,
     elliptic_curve::{
-        bigint::Uint, group::GroupEncoding, ops::Reduce, point::AffineCoordinates, PrimeField,
+        self, group::GroupEncoding, ops::Reduce, point::AffineCoordinates, PrimeField,
     },
-    AffinePoint,
+    AffinePoint, Secp256k1,
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
@@ -80,9 +81,11 @@ impl TryFrom<MpcSignature> for ethers_core::types::Signature {
             hex::decode(big_r_hex)?[..].into(),
         ))
         .ok_or(MpcSignatureDecodeError::InvalidSignatureData)?;
-        let s = ethers_core::k256::Scalar::from_bytes(&hex::decode(s_hex)?);
+        let s = k256::Scalar::from_bytes(&hex::decode(s_hex)?);
 
-        let r = <ethers_core::k256::Scalar as Reduce<Uint<4>>>::reduce_bytes(&big_r.x());
+        let r = <k256::Scalar as Reduce<<Secp256k1 as elliptic_curve::Curve>::Uint>>::reduce_bytes(
+            &big_r.x(),
+        );
         let x_is_reduced = r.to_repr() != big_r.x();
 
         let v = RecoveryId::new(big_r.y_is_odd().into(), x_is_reduced);
