@@ -40,10 +40,10 @@ impl Contract {
 
     /// Set the signer contract ID.
     /// Requires a call to [`Contract::refresh_signer_public_key`] afterwards.
-    pub fn set_signer_contract_id(&mut self, signer_contract_id: AccountId) {
+    pub fn set_signer_contract_id(&mut self, account_id: AccountId) {
         self.assert_owner();
-        if self.signer_contract_id != signer_contract_id {
-            self.signer_contract_id = signer_contract_id;
+        if self.signer_contract_id != account_id {
+            self.signer_contract_id = account_id;
             self.signer_contract_public_key = None;
         }
     }
