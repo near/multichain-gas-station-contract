@@ -1,0 +1,22 @@
+[tasks.build]
+workspace = false
+clear = true
+script = """
+cargo build --package near-multichain-gas-station-contract --target wasm32-unknown-unknown --release
+"""
+
+[tasks.test]
+workspace = false
+clear = true
+script = """
+mkdir -p target/near/{oracle,signer}
+cargo test
+"""
+
+[tasks.nextest]
+workspace = false
+clear = true
+script = """
+mkdir -p target/near/{oracle,signer}
+cargo nextest run
+"""
