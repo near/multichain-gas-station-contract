@@ -6,7 +6,7 @@ use near_sdk::{
     json_types::{U128, U64},
     near_bindgen, require,
     store::Vector,
-    AccountId, Promise, PromiseError,
+    AccountId, Promise, PromiseError, PromiseOrValue,
 };
 use near_sdk_contract_tools::owner::{Owner, OwnerExternal};
 
@@ -38,14 +38,32 @@ impl Contract {
         &self.signer_contract_id
     }
 
-    /// Set the signer contract ID.
-    /// Requires a call to [`Contract::refresh_signer_public_key`] afterwards.
-    pub fn set_signer_contract_id(&mut self, account_id: AccountId) {
+    /// Set the signer contract ID. Automatically refreshes the public key
+    /// unless `refresh` is `false`, in which case it requires a call to
+    /// [`Contract::refresh_signer_public_key`] afterwards.
+    pub fn set_signer_contract_id(
+        &mut self,
+        account_id: AccountId,
+        refresh: Option<bool>,
+    ) -> PromiseOrValue<()> {
         self.assert_owner();
+
         if self.signer_contract_id != account_id {
             self.signer_contract_id = account_id;
             self.signer_contract_public_key = None;
+
+            if refresh.unwrap_or(true) {
+                return PromiseOrValue::Promise(
+                    ext_signer::ext(self.signer_contract_id.clone())
+                        .public_key()
+                        .then(
+                            Self::ext(env::current_account_id()).refresh_signer_public_key_callback(),
+                        ),
+                );
+            }
         }
+
+        PromiseOrValue::Value(())
     }
 
     /// Refresh the public key from the signer contract.
