@@ -14,7 +14,7 @@ struct Contract {}
 impl SignerContract for Contract {
     fn sign(&mut self, payload: [u8; 32], path: &String) -> PromiseOrValue<MpcSignature> {
         let _ = (payload, path);
-        PromiseOrValue::Value(MpcSignature::new([127; 32], [33; 32], 1))
+        PromiseOrValue::Value(MpcSignature::new([0; 32], [0; 32], 0))
     }
 
     fn state(&self) -> ProtocolContractState {
