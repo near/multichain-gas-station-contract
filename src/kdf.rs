@@ -53,7 +53,7 @@ pub fn derive_key(public_key: PublicKey, epsilon: Scalar) -> PublicKey {
 }
 
 #[must_use]
-pub fn derive_key_for_account(
+pub fn derive_evm_address_for_account(
     mpc_public_key: PublicKey,
     account_id: &AccountId,
     path: &str,
@@ -61,7 +61,8 @@ pub fn derive_key_for_account(
     let epsilon = derive_epsilon(account_id, path);
     let affine_point = derive_key(mpc_public_key, epsilon);
     let encoded = affine_point.to_encoded_point(false);
-    ethers_core::utils::raw_public_key_to_address(&encoded.as_bytes()[1..])
+    let encoded_bytes = encoded.as_bytes();
+    ethers_core::utils::raw_public_key_to_address(&encoded_bytes[1..])
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -115,7 +116,7 @@ pub fn get_mpc_address(
     caller_account_id: &str,
 ) -> Result<ForeignAddress, PublicKeyConversionError> {
     let affine = near_public_key_to_affine(mpc_public_key)?;
-    Ok(derive_key_for_account(affine, gas_station_account_id, caller_account_id).into())
+    Ok(derive_evm_address_for_account(affine, gas_station_account_id, caller_account_id).into())
 }
 
 #[test]
@@ -126,8 +127,46 @@ fn test_keys() {
 
     let a = near_public_key_to_affine(public_key.clone()).unwrap();
 
-    let mpc_address =
-        derive_key_for_account(a, &"canhazgas.testnet".parse().unwrap(), "hatchet.testnet");
+    let encoded = a.to_encoded_point(false);
+    println!("{:x}", encoded);
+
+    let mpc_address = derive_evm_address_for_account(a, &"canhazgas.testnet".parse().unwrap(), "");
 
     println!("{}", ethers_core::utils::to_checksum(&mpc_address, None));
+}
+
+// The below tests confirm parity with https://gist.github.com/esaminu/f8cc37849de754f228c5a67bebce9b0f
+
+#[test]
+fn test_derive_epsilon() {
+    let epsilon = derive_epsilon(&"canhazgas.testnet".parse().unwrap(), "");
+    let b = epsilon.to_bytes();
+    assert_eq!(
+        hex::encode(b.as_slice()),
+        "2f11aa32079bf3f96684143a68e66c47b83afd6fc721999989543ad1a16f948d"
+    );
+}
+
+#[test]
+fn test_derive_key() {
+    let parent_public_key_bytes = hex::decode("049c0e823c86c14a5810d00c2d584c0b787337bff65a55465febfc15dbaba509f1e46ec19c2b85e8fb6df520df8234127617c94d302abeaed2d2ae1170562e87e9").unwrap();
+    let parent_encoded_point = EncodedPoint::from_bytes(parent_public_key_bytes).unwrap();
+    let parent_affine_point = AffinePoint::from_encoded_point(&parent_encoded_point).unwrap();
+    let epsilon = derive_epsilon(&"canhazgas.testnet".parse().unwrap(), "");
+    let derived_key = derive_key(parent_affine_point, epsilon);
+    let derived_key_encoded_point = derived_key.to_encoded_point(false);
+    assert_eq!(
+        hex::encode(derived_key_encoded_point.as_bytes()),
+        "04762ab28d3efef07ea4df3e61bafb14b9389f67a91fe3db3214132ebceef7a115644a8b87e01cb0c0cb34d78b176c7358f93a73dd7d5d885bbd598dde06e69647"
+    );
+}
+
+#[test]
+fn test_derive_evm_address() {
+    let public_key_bytes = hex::decode("04762ab28d3efef07ea4df3e61bafb14b9389f67a91fe3db3214132ebceef7a115644a8b87e01cb0c0cb34d78b176c7358f93a73dd7d5d885bbd598dde06e69647").unwrap();
+    let evm_address = format!(
+        "{:#x}",
+        &ethers_core::utils::raw_public_key_to_address(&public_key_bytes[1..]),
+    );
+    assert_eq!(evm_address, "0x4a435791735b6295637dbf2a44bd1f9f1a5e3cbc");
 }
