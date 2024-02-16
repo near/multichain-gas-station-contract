@@ -57,7 +57,8 @@ impl Contract {
                     ext_signer::ext(self.signer_contract_id.clone())
                         .public_key()
                         .then(
-                            Self::ext(env::current_account_id()).refresh_signer_public_key_callback(),
+                            Self::ext(env::current_account_id())
+                                .refresh_signer_public_key_callback(),
                         ),
                 );
             }
@@ -84,6 +85,10 @@ impl Contract {
             env::panic_str("Failed to load signer public key from the signer contract")
         });
         self.signer_contract_public_key = Some(public_key);
+    }
+
+    pub fn get_signer_public_key(&self) -> Option<&near_sdk::PublicKey> {
+        self.signer_contract_public_key.as_ref()
     }
 
     pub fn get_flags(&self) -> &Flags {

@@ -120,6 +120,7 @@ pub enum StorageKey {
 
 // TODO: Pausability
 // TODO: Storage management
+// TODO: Ensure sufficient balance on foreign chain
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Owner)]
 #[near_bindgen]
 pub struct Contract {
