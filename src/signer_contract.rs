@@ -7,46 +7,19 @@ use ethers_core::k256::{
     AffinePoint, Secp256k1,
 };
 use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
     ext_contract,
     serde::{Deserialize, Serialize},
-    PromiseOrValue, PublicKey,
+    PromiseOrValue,
 };
 use schemars::JsonSchema;
 use thiserror::Error;
 
 use crate::kdf::ScalarExt;
 
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
-#[serde(crate = "near_sdk::serde")]
-pub struct InitializingContractState {}
-
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
-#[serde(crate = "near_sdk::serde")]
-pub struct RunningContractState {
-    pub public_key: PublicKey,
-}
-
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
-#[serde(crate = "near_sdk::serde")]
-pub struct ResharingContractState {
-    pub public_key: PublicKey,
-}
-
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug)]
-#[serde(crate = "near_sdk::serde")]
-pub enum ProtocolContractState {
-    NotInitialized,
-    Initializing(InitializingContractState),
-    Running(RunningContractState),
-    Resharing(ResharingContractState),
-}
-
 #[allow(clippy::ptr_arg)]
 #[ext_contract(ext_signer)]
 pub trait SignerContract {
     fn sign(&mut self, payload: [u8; 32], path: &String) -> PromiseOrValue<MpcSignature>;
-    fn state(&self) -> ProtocolContractState;
     fn public_key(&self) -> near_sdk::PublicKey;
 }
 
