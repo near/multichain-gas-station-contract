@@ -202,7 +202,13 @@ impl Contract {
             .collect()
     }
 
-    pub fn add_paymaster(&mut self, chain_id: U64, nonce: u32, key_path: String) -> u32 {
+    pub fn add_paymaster(
+        &mut self,
+        chain_id: U64,
+        nonce: u32,
+        key_path: String,
+        balance: Option<near_sdk::json_types::U128>,
+    ) -> u32 {
         self.assert_owner();
 
         require!(
@@ -217,11 +223,27 @@ impl Contract {
 
         let index = chain.paymasters.len();
 
-        chain
-            .paymasters
-            .push(PaymasterConfiguration { nonce, key_path });
+        chain.paymasters.push(PaymasterConfiguration {
+            nonce,
+            key_path,
+            minimum_available_balance: U256::from(balance.map_or(0, |v| v.0)).0,
+        });
 
         index
+    }
+
+    pub fn set_paymaster_balance(&mut self, chain_id: U64, index: u32, balance: U128) {
+        self.assert_owner();
+        let chain = self
+            .foreign_chains
+            .get_mut(&chain_id.0)
+            .unwrap_or_else(|| env::panic_str("Foreign chain does not exist"));
+
+        let paymaster = chain.paymasters.get_mut(index).unwrap_or_else(|| {
+            env::panic_str("Invalid index");
+        });
+
+        paymaster.minimum_available_balance = U256::from(balance.0).0;
     }
 
     pub fn set_paymaster_nonce(&mut self, chain_id: U64, index: u32, nonce: u32) {

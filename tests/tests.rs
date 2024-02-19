@@ -7,7 +7,7 @@ use ethers_core::{
             bigint::Uint, group::GroupEncoding, ops::Reduce, point::AffineCoordinates, PrimeField,
         },
     },
-    types::transaction::eip2718::TypedTransaction,
+    types::{transaction::eip2718::TypedTransaction, U256},
     utils::rlp::Rlp,
 };
 use near_multichain_gas_station_contract::{
@@ -70,6 +70,7 @@ async fn test() {
         })))
         .call(Function::new("add_paymaster").args_json(json!({
             "chain_id": "0",
+            "balance": "100000000",
             "nonce": 0,
             "key_path": "$",
         })))
@@ -94,6 +95,7 @@ async fn test() {
         result,
         vec![PaymasterConfiguration {
             nonce: 0,
+            minimum_available_balance: U256::from(100000000).0,
             key_path: "$".to_string()
         }]
     );
@@ -170,14 +172,14 @@ async fn test() {
 #[ignore = "generate a payload signable by the contract"]
 fn generate_eth_rlp_hex() {
     let eth_transaction = ethers_core::types::TransactionRequest {
-        chain_id: Some(0.into()),
+        chain_id: Some(97.into()),
         from: None,
-        to: Some(ForeignAddress([0xaa; 20]).into()),
+        to: Some(ForeignAddress([0x0f; 20]).into()),
         data: None,
         gas: Some(21000.into()),
-        gas_price: Some(2.into()),
-        value: Some(1111.into()),
-        nonce: Some(3.into()),
+        gas_price: Some(8888.into()),
+        value: Some(1234.into()),
+        nonce: Some(7777.into()),
     };
 
     println!("{}", hex::encode(eth_transaction.rlp()));
@@ -185,8 +187,37 @@ fn generate_eth_rlp_hex() {
 
 #[test]
 fn decode_rlp() {
+    // ["f865118222b8825208941345301adbfb8d0ca0ddda64a68c4dfbdbd28e408416400b808080a0ee5aca1ea8216f98ff7743395b4caa21a8423146eb7e5e13e12385af124faf37a0bae88f6a08d0f042ddd3f68bfa659e75d4cda2ea6c7a9ca4b0511bc8fc4c2c34","f865821e618222b882520894abababababababababababababababababababab8204d28080a0b5aa8dafdc148ce9d6f9f12dc90abf11d1536db7f32a4b0b448d06024724bc84a016c61437de5c61c7f444943ac048917123bb92afa425f4b2c2da4ec1d9c8c907"]
+
+    // first run:
+    // paymaster tx from: 0x64cb2dee943db6b4a6a8f94c4e3eb81c44ca6c7f
+    // paymaster tx to: 0x1345301adbfb8d0ca0ddda64a68c4dfbdbd28e40
+    // user tx from: 0xf5c0d04504e796f2624cead901fae85c976ae8bd
+    // public key: secp256k1:4HFcTSodRLVCGNVcGc4Mf2fwBBBxv9jxkGdiW2S2CA1y6UpVVRWKj6RX7d7TDt65k2Bj3w9FU4BGtt43ZvuhCnNt
+
+    // second run:
+    // first signed tx: f865128222b8825208941345301adbfb8d0ca0ddda64a68c4dfbdbd28e408416400b808001a0169f52f79fe6a7b322517882823c6caf64d463a35723c284e206f4e7ba9eb3d7a082104850ae0eb2407ec69df9cc4e977c33d1463a6c3f1f197a946e60be64981d
+    // paymaster tx from: 0x286364ce3fe69909ecf201e8821280c26e413aea
+    // paymaster tx to: 0x1345301adbfb8d0ca0ddda64a68c4dfbdbd28e40
+    // second signed tx: f865821e618222b882520894ababababababababababababababababababadab8204d28080a0ca4c7d5b033891493f5494e078a59dddab4c358cf253308f19c9a37461678360a0820dd725e347a938695a9c0e4335895f4ceb9098249a5a8c10ee580121250022
+    // user tx from: 0x812a6d0652e09f8df6a7754c6b1933a33ea42fc1
+
+    // third run:
+    // first signed tx: f865138222b8825208941345301adbfb8d0ca0ddda64a68c4dfbdbd28e408416400b808080a0ba93727e4d2dad388a90b04c3e7bf215ed90cd63fddb7247a8a5ea6cd81079c8a0250367f4c84ca019bfecd3bb2bf7bac9b4c9211425b0b1c553e63dd6592b5759
+    // paymaster tx from: 0xc0a7a1648d2debf28cc29fef377a625b525f44bd
+    // paymaster tx to: 0x1345301adbfb8d0ca0ddda64a68c4dfbdbd28e40
+    // second signed tx: f865821e618222b882520894ababababababababababababababababababaeab8204d28080a00cfd42288ba70701554a0db9b93cc16f90b2440337d4867b1a14571825bc270aa0c2eaa1679b17fc5d66ddbaba5c7cd872dcd8349c4f5000071f31bfe4bdc9e41b
+    // user tx from: 0x3ba43fc3d28621214161161a3794df820b31a7f6
+
+    // fourth run (payload identical to third run):
+    // first signed tx: f865138222b8825208941345301adbfb8d0ca0ddda64a68c4dfbdbd28e408416400b808001a0206e5d105365a448fa0eece7fff0b0b9c2284e921484601cfc74795a12082f3fa0ef066672f6e83d96eefc890c7164d6f683048127a2bc8243597b5fb3fd5e717c
+    // paymaster tx from: 0x53929a94d243578da370c961832075f98cea2785
+    // paymaster tx to: 0x1345301adbfb8d0ca0ddda64a68c4dfbdbd28e40
+    // second signed tx: f865821e618222b882520894ababababababababababababababababababaeab8204d28080a068f8c262d95b98275eddd7ba2d8ff272919724681a9f53342d5b2dd066de20fca0d86d8655f90fcd29212d2eb18b22419cbf48692b18881e51d1b1eba46aea992e
+    // user tx from: 0x7b7696549651f63f2e6b112acabd2cdc9ceb2796
+
     let bytes = hex::decode(
-        "f85f8078825208940505050505050505050505050505050505050505648003a033d5ef8c991ec82b9a6b38b7f7ca91ba34ec814c9eec1e2a42e4fc4fc9c443f7a0675e56a82d9464d1cba7ef62d7b9d6e1a4b87328c610b28dfc4b81815f8969d0",
+        "f865821e618222b882520894ababababababababababababababababababaeab8204d28080a068f8c262d95b98275eddd7ba2d8ff272919724681a9f53342d5b2dd066de20fca0d86d8655f90fcd29212d2eb18b22419cbf48692b18881e51d1b1eba46aea992e",
     )
     .unwrap();
 

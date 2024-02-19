@@ -263,7 +263,7 @@ impl Contract {
             let chain_id = transaction.chain_id;
 
             let pending_transaction_sequence = PendingTransactionSequence {
-                signature_requests: vec![SignatureRequest::new(&predecessor, transaction)],
+                signature_requests: vec![SignatureRequest::new(&predecessor, transaction, false)],
                 created_by_id: predecessor,
                 created_at_block_timestamp_ns: env::block_timestamp().into(),
                 escrow: None,
@@ -350,9 +350,17 @@ impl Contract {
             nonce: U256::from(paymaster.next_nonce()).0,
         };
 
+        if let Some(balance) =
+            U256(paymaster.minimum_available_balance).checked_sub(request_tokens_for_gas)
+        {
+            paymaster.minimum_available_balance = balance.0;
+        } else {
+            env::panic_str("Paymaster does not have enough funds");
+        }
+
         let signature_requests = vec![
-            SignatureRequest::new(&paymaster.key_path, paymaster_transaction),
-            SignatureRequest::new(&sender, transaction_request.clone()),
+            SignatureRequest::new(&paymaster.key_path, paymaster_transaction, true),
+            SignatureRequest::new(&sender, transaction_request.clone(), false),
         ];
 
         let pending_transaction_sequence = PendingTransactionSequence {
@@ -428,14 +436,16 @@ impl Contract {
         let pending_transaction_sequence = self
             .pending_transaction_sequences
             .get_mut(&id)
-            .unwrap_or_else(|| env::panic_str(&format!("Pending transaction {id} not found")));
+            .unwrap_or_else(|| {
+                env::panic_str(&format!("Pending transaction sequence {id} not found"))
+            });
 
         let request = pending_transaction_sequence
             .signature_requests
             .get_mut(index as usize)
             .unwrap_or_else(|| {
                 env::panic_str(&format!(
-                    "Signature request {id}.{index} not found in transaction",
+                    "Signature request {id}.{index} not found in transaction sequence",
                 ))
             });
 
@@ -446,6 +456,7 @@ impl Contract {
         }
 
         // TODO: What to do if signing fails?
+        // TODO: Refund the amount to the paymaster account?
         let signature = result
             .unwrap_or_else(|e| env::panic_str(&format!("Failed to produce signature: {e:?}")))
             .try_into()

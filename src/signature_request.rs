@@ -83,14 +83,20 @@ pub enum Status {
 pub struct SignatureRequest {
     pub status: Status,
     pub key_path: String,
+    pub is_paymaster: bool,
     pub transaction: ValidTransactionRequest,
 }
 
 impl SignatureRequest {
-    pub fn new(key_path: &impl ToString, transaction: ValidTransactionRequest) -> Self {
+    pub fn new(
+        key_path: &impl ToString,
+        transaction: ValidTransactionRequest,
+        is_paymaster: bool,
+    ) -> Self {
         Self {
             status: Status::Pending,
             key_path: key_path.to_string(),
+            is_paymaster,
             transaction,
         }
     }
