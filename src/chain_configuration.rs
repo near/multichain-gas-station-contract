@@ -23,6 +23,7 @@ use crate::oracle::{process_oracle_result, PriceData};
 pub struct PaymasterConfiguration {
     pub nonce: u32,
     pub key_path: String,
+    pub minimum_available_balance: [u64; 4],
 }
 
 impl PaymasterConfiguration {
