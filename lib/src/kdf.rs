@@ -138,7 +138,7 @@ pub fn construct_spoof_key(
 fn test_spoof() {
     use ethers_core::{types::transaction::eip2718::TypedTransaction, utils::rlp::Rlp};
 
-    use crate::MpcSignature;
+    use crate::signer_contract::MpcSignature;
 
     let useless_public_key: near_sdk::PublicKey = "secp256k1:47xve2ymatpG4x4Gp7pmYwuLJk7eeRegrFuS4VoW5VV4i3GsBiBY87vkH6UZiiY18NeZnkBzcZzipDbJJ5pmjTcc"
         .parse()

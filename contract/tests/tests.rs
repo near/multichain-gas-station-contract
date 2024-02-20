@@ -1,9 +1,12 @@
 // NOTE: If tests fail due to a directory not existing error, create `target/near/{oracle,signer}`
 
 use contract::{
-    chain_configuration::PaymasterConfiguration, foreign_address::ForeignAddress,
-    signer_contract::MpcSignature, valid_transaction_request::ValidTransactionRequest,
+    chain_configuration::PaymasterConfiguration, valid_transaction_request::ValidTransactionRequest,
     TransactionCreation,
+};
+use lib::{
+foreign_address::ForeignAddress,
+    signer_contract::MpcSignature, 
 };
 use ethers_core::{
     k256::{
@@ -180,7 +183,7 @@ async fn test() {
 
     let signed_transaction_bytes = hex::decode(signed_tx_2).unwrap();
     let signed_transaction_rlp = Rlp::new(&signed_transaction_bytes);
-    let tx = TypedTransaction::decode(&signed_transaction_rlp).unwrap();
+    let (tx, _s) = TypedTransaction::decode_signed(&signed_transaction_rlp).unwrap();
     assert_eq!(alice_foreign_address, tx.from().unwrap().into());
 }
 
