@@ -40,6 +40,7 @@ impl MpcSignature {
         Some(Self(hex::encode(big_r.to_bytes()), hex::encode(s)))
     }
 
+    #[must_use]
     pub fn from_ecdsa_signature(
         signature: ethers_core::k256::ecdsa::Signature,
         recovery_id: RecoveryId,

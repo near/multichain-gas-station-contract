@@ -46,8 +46,7 @@ impl Contract {
             oracle_local_asset_id,
             flags: Flags::default(),
             expire_sequence_after_ns: expire_sequence_after_ns
-                .map(u64::from)
-                .unwrap_or(DEFAULT_EXPIRE_SEQUENCE_IN_NS),
+                .map_or(DEFAULT_EXPIRE_SEQUENCE_IN_NS, u64::from),
             foreign_chains: UnorderedMap::new(StorageKey::ForeignChains),
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),

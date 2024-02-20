@@ -1,12 +1,8 @@
 // NOTE: If tests fail due to a directory not existing error, create `target/near/{oracle,signer}`
 
 use contract::{
-    chain_configuration::PaymasterConfiguration, valid_transaction_request::ValidTransactionRequest,
-    TransactionCreation,
-};
-use lib::{
-foreign_address::ForeignAddress,
-    signer_contract::MpcSignature, 
+    chain_configuration::PaymasterConfiguration,
+    valid_transaction_request::ValidTransactionRequest, TransactionCreation,
 };
 use ethers_core::{
     k256::{
@@ -17,8 +13,9 @@ use ethers_core::{
         },
     },
     types::{transaction::eip2718::TypedTransaction, U256},
-    utils::rlp::{Decodable, Rlp},
+    utils::rlp::Rlp,
 };
+use lib::{foreign_address::ForeignAddress, signer_contract::MpcSignature};
 use near_sdk::serde_json::json;
 use near_workspaces::{
     operations::Function,
@@ -106,13 +103,15 @@ async fn test() {
 
     let alice = w.dev_create_account().await.unwrap();
 
-    let eth_transaction = ethers_core::types::TransactionRequest {
+    let eth_transaction = ethers_core::types::transaction::eip1559::Eip1559TransactionRequest {
         chain_id: Some(0.into()),
         from: None,
         to: Some(ForeignAddress([1; 20]).into()),
         data: None,
         gas: Some(21000.into()),
-        gas_price: Some(120.into()),
+        max_fee_per_gas: Some(100.into()),
+        max_priority_fee_per_gas: Some(100.into()),
+        access_list: vec![].into(),
         value: Some(100.into()),
         nonce: Some(0.into()),
     };
@@ -190,13 +189,15 @@ async fn test() {
 #[test]
 #[ignore = "generate a payload signable by the contract"]
 fn generate_eth_rlp_hex() {
-    let eth_transaction = ethers_core::types::TransactionRequest {
+    let eth_transaction = ethers_core::types::transaction::eip1559::Eip1559TransactionRequest {
         chain_id: Some(97.into()),
         from: None,
         to: Some(ForeignAddress([0x0f; 20]).into()),
         data: None,
         gas: Some(21000.into()),
-        gas_price: Some(8888.into()),
+        access_list: vec![].into(),
+        max_fee_per_gas: Some(1234.into()),
+        max_priority_fee_per_gas: Some(1234.into()),
         value: Some(1234.into()),
         nonce: Some(7777.into()),
     };

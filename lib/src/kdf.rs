@@ -125,6 +125,7 @@ pub fn get_mpc_address(
 
 /// WARNING: THIS IS BAD BAD BAD PRACTICE, DO NOT USE IN PRODUCTION CODE!!!!!
 #[cfg(feature = "debug")]
+#[must_use]
 pub fn construct_spoof_key(
     predecessor: &[u8],
     path: &[u8],

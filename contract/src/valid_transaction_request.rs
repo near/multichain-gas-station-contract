@@ -1,13 +1,17 @@
-use ethers_core::types::{
-    transaction::eip2718::TypedTransaction, NameOrAddress, TransactionRequest, U256, U64,
+use ethers_core::{
+    types::{
+        transaction::{eip2718::TypedTransaction, eip2930::AccessList},
+        Eip1559TransactionRequest, NameOrAddress, U256, U64,
+    },
+    utils::rlp::{Decodable, Encodable, Rlp},
 };
+use lib::foreign_address::ForeignAddress;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     serde::{Deserialize, Serialize},
 };
 use schemars::JsonSchema;
 use thiserror::Error;
-use lib::foreign_address::ForeignAddress;
 
 #[derive(
     Serialize,
@@ -22,21 +26,23 @@ use lib::foreign_address::ForeignAddress;
 )]
 #[serde(crate = "near_sdk::serde")]
 pub struct ValidTransactionRequest {
-    pub receiver: ForeignAddress,
+    pub to: ForeignAddress,
     pub gas: [u64; 4],
-    pub gas_price: [u64; 4],
     pub value: [u64; 4],
     pub data: Vec<u8>,
     pub nonce: [u64; 4],
+    pub access_list_rlp: Vec<u8>,
+    pub max_priority_fee_per_gas: [u64; 4],
+    pub max_fee_per_gas: [u64; 4],
     pub chain_id: u64,
 }
 
-impl TryFrom<TransactionRequest> for ValidTransactionRequest {
+impl TryFrom<Eip1559TransactionRequest> for ValidTransactionRequest {
     type Error = TransactionValidationError;
 
-    fn try_from(transaction: TransactionRequest) -> Result<Self, Self::Error> {
+    fn try_from(transaction: Eip1559TransactionRequest) -> Result<Self, Self::Error> {
         Ok(Self {
-            receiver: transaction
+            to: transaction
                 .to
                 .ok_or(TransactionValidationError::Missing("to"))?
                 .as_address()
@@ -46,10 +52,6 @@ impl TryFrom<TransactionRequest> for ValidTransactionRequest {
                 .gas
                 .ok_or(TransactionValidationError::Missing("gas"))?
                 .0,
-            gas_price: transaction
-                .gas_price
-                .ok_or(TransactionValidationError::Missing("gas_price"))?
-                .0,
             value: transaction
                 .value
                 .ok_or(TransactionValidationError::Missing("value"))?
@@ -58,6 +60,17 @@ impl TryFrom<TransactionRequest> for ValidTransactionRequest {
             nonce: transaction
                 .nonce
                 .ok_or(TransactionValidationError::Missing("nonce"))?
+                .0,
+            access_list_rlp: transaction.access_list.rlp_bytes().to_vec(),
+            max_priority_fee_per_gas: transaction
+                .max_priority_fee_per_gas
+                .ok_or(TransactionValidationError::Missing(
+                    "max_priority_fee_per_gas",
+                ))?
+                .0,
+            max_fee_per_gas: transaction
+                .max_fee_per_gas
+                .ok_or(TransactionValidationError::Missing("max_fee_per_gas"))?
                 .0,
             chain_id: transaction
                 .chain_id
@@ -74,8 +87,17 @@ impl ValidTransactionRequest {
     }
 
     #[must_use]
-    pub fn gas_price(&self) -> U256 {
-        U256(self.gas_price)
+    pub fn max_fee_per_gas(&self) -> U256 {
+        U256(self.max_fee_per_gas)
+    }
+
+    #[must_use]
+    pub fn max_priority_fee_per_gas(&self) -> U256 {
+        U256(self.max_priority_fee_per_gas)
+    }
+
+    pub fn access_list(&self) -> Result<AccessList, ethers_core::utils::rlp::DecoderError> {
+        AccessList::decode(&Rlp::new(&self.access_list_rlp))
     }
 
     #[must_use]
@@ -93,20 +115,22 @@ impl ValidTransactionRequest {
         U64([self.chain_id])
     }
 
-    /// Useful because `TransactionRequest` annoyingly has a local function called `from`.
+    /// Useful because transaction types annoyingly have a local function called `from`.
     #[must_use]
     pub fn into_typed_transaction(self) -> TypedTransaction {
-        <TransactionRequest as From<ValidTransactionRequest>>::from(self).into()
+        <Eip1559TransactionRequest as From<ValidTransactionRequest>>::from(self).into()
     }
 }
 
-impl From<ValidTransactionRequest> for TransactionRequest {
+impl From<ValidTransactionRequest> for Eip1559TransactionRequest {
     fn from(transaction: ValidTransactionRequest) -> Self {
         Self {
             from: None,
-            to: Some(NameOrAddress::Address(transaction.receiver.into())),
+            access_list: transaction.access_list().unwrap(),
+            max_priority_fee_per_gas: Some(transaction.max_priority_fee_per_gas()),
+            max_fee_per_gas: Some(transaction.max_fee_per_gas()),
+            to: Some(NameOrAddress::Address(transaction.to.into())),
             gas: Some(transaction.gas()),
-            gas_price: Some(transaction.gas_price()),
             value: Some(transaction.value()),
             nonce: Some(transaction.nonce()),
             chain_id: Some(transaction.chain_id()),
@@ -117,7 +141,7 @@ impl From<ValidTransactionRequest> for TransactionRequest {
 
 impl From<ValidTransactionRequest> for TypedTransaction {
     fn from(value: ValidTransactionRequest) -> Self {
-        <TransactionRequest as From<ValidTransactionRequest>>::from(value).into()
+        <Eip1559TransactionRequest as From<ValidTransactionRequest>>::from(value).into()
     }
 }
 

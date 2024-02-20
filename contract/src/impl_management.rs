@@ -365,7 +365,7 @@ impl Contract {
 
         let paymaster_transaction_gas = foreign_chain_configuration.transfer_gas();
         let request_tokens_for_gas =
-            (transaction.gas() + paymaster_transaction_gas) * transaction.gas_price();
+            (transaction.gas() + paymaster_transaction_gas) * transaction.max_fee_per_gas();
 
         foreign_chain_configuration
             .foreign_token_price(

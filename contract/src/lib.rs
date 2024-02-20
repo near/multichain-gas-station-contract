@@ -1,7 +1,11 @@
 use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, TransactionRequest, U256},
+    types::{transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, U256},
     utils::rlp::{Decodable, Rlp},
 };
+use lib::foreign_address::ForeignAddress;
+use lib::kdf::get_mpc_address;
+use lib::oracle::{ext_oracle, PriceData};
+use lib::signer_contract::{ext_signer, MpcSignature};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,
@@ -14,10 +18,6 @@ use near_sdk::{
 #[allow(clippy::wildcard_imports)]
 use near_sdk_contract_tools::{owner::*, standard::nep297::Event, Owner};
 use schemars::JsonSchema;
-use lib::signer_contract::{ext_signer, MpcSignature};
-use lib::kdf::get_mpc_address;
-use lib::oracle::{ext_oracle, PriceData};
-use lib::foreign_address::ForeignAddress;
 
 pub mod asset;
 use asset::{AssetBalance, AssetId};
@@ -175,7 +175,7 @@ impl Contract {
         // Check receiver whitelist
         if self.flags.is_receiver_whitelist_enabled {
             require!(
-                self.receiver_whitelist.contains(&transaction.receiver),
+                self.receiver_whitelist.contains(&transaction.to),
                 "Receiver is not whitelisted",
             );
         }
@@ -293,9 +293,8 @@ impl Contract {
         let price_data = result.unwrap_or_else(|_| env::panic_str("Failed to fetch price data"));
 
         let paymaster_transaction_gas = foreign_chain_configuration.transfer_gas();
-        let gas_price = transaction_request.gas_price();
-        let request_tokens_for_gas =
-            (transaction_request.gas() + paymaster_transaction_gas) * gas_price; // Validation ensures gas is set.
+        let request_tokens_for_gas = (transaction_request.gas() + paymaster_transaction_gas)
+            * transaction_request.max_fee_per_gas(); // Validation ensures gas is set.
 
         let fee = foreign_chain_configuration.foreign_token_price(
             &self.oracle_local_asset_id,
@@ -334,12 +333,14 @@ impl Contract {
 
         let paymaster_transaction = ValidTransactionRequest {
             chain_id,
-            receiver: sender_foreign_address,
+            to: sender_foreign_address,
             value: request_tokens_for_gas.0,
             gas: paymaster_transaction_gas.0,
-            gas_price: gas_price.0,
             data: vec![],
             nonce: U256::from(paymaster.next_nonce()).0,
+            access_list_rlp: vec![0xc0 /* rlp encoding for empty list */],
+            max_priority_fee_per_gas: transaction_request.max_priority_fee_per_gas,
+            max_fee_per_gas: transaction_request.max_fee_per_gas,
         };
 
         if let Some(balance) =
@@ -537,11 +538,11 @@ impl Contract {
     }
 }
 
-fn decode_transaction_request(rlp_hex: &str) -> TransactionRequest {
+fn decode_transaction_request(rlp_hex: &str) -> Eip1559TransactionRequest {
     let rlp_bytes = hex::decode(rlp_hex)
         .unwrap_or_else(|_| env::panic_str("Error decoding `transaction_rlp` as hex"));
     let rlp = Rlp::new(&rlp_bytes);
-    TransactionRequest::decode(&rlp).unwrap_or_else(|_| {
+    Eip1559TransactionRequest::decode(&rlp).unwrap_or_else(|_| {
         env::panic_str("Error decoding `transaction_rlp` as transaction request RLP")
     })
 }

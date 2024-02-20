@@ -26,7 +26,7 @@ impl Oracle for Contract {
                     asset_id: "weth.fakes.testnet".to_string(),
                     price: Some(Price {
                         decimals: 20,
-                        multiplier: 226435.into(),
+                        multiplier: 226_435.into(),
                     }),
                 },
             ],
