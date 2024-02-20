@@ -1,4 +1,4 @@
-use near_multichain_gas_station_contract::oracle::{AssetOptionalPrice, Oracle, Price, PriceData};
+use lib::oracle::{AssetOptionalPrice, Oracle, Price, PriceData};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, near_bindgen,

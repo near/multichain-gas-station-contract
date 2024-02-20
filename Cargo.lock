@@ -246,14 +246,13 @@ dependencies = [
 
 [[package]]
 name = "auto_impl"
-version = "1.1.0"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fee3da8ef1276b0bee5dd1c7258010d8fffd31801447323115a25560e1327b89"
+checksum = "823b8bb275161044e2ac7a25879cb3e2480cb403e3943022c7c769c599b756aa"
 dependencies = [
- "proc-macro-error",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.48",
 ]
 
 [[package]]
@@ -752,9 +751,9 @@ dependencies = [
 
 [[package]]
 name = "const-hex"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5104de16b218eddf8e34ffe2f86f74bfa4e61e95a1b89732fccf6325efd0557"
+checksum = "18d59688ad0945eaf6b84cb44fedbe93484c81b48970e98f09db8a22832d7961"
 dependencies = [
  "cfg-if 1.0.0",
  "cpufeatures",
@@ -774,6 +773,21 @@ name = "constant_time_eq"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
+
+[[package]]
+name = "contract"
+version = "0.1.0"
+dependencies = [
+ "ethers-core",
+ "hex",
+ "lib",
+ "near-sdk",
+ "near-sdk-contract-tools",
+ "near-workspaces",
+ "schemars",
+ "thiserror",
+ "tokio",
+]
 
 [[package]]
 name = "convert_case"
@@ -1929,6 +1943,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
+name = "lib"
+version = "0.1.0"
+dependencies = [
+ "ethers-core",
+ "getrandom 0.2.12",
+ "hex",
+ "near-sdk",
+ "schemars",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.152"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2215,22 +2242,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
-]
-
-[[package]]
-name = "near-multichain-gas-station-contract"
-version = "0.1.0"
-dependencies = [
- "ethers-core",
- "getrandom 0.2.12",
- "hex",
- "near-sdk",
- "near-sdk-contract-tools",
- "near-workspaces",
- "schemars",
- "sha2",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
@@ -2781,7 +2792,7 @@ dependencies = [
 name = "oracle"
 version = "0.1.0"
 dependencies = [
- "near-multichain-gas-station-contract",
+ "lib",
  "near-sdk",
 ]
 
@@ -3837,7 +3848,7 @@ dependencies = [
 name = "signer"
 version = "0.1.0"
 dependencies = [
- "near-multichain-gas-station-contract",
+ "lib",
  "near-sdk",
 ]
 

@@ -1,7 +1,10 @@
-use near_multichain_gas_station_contract::signer_contract::{MpcSignature, SignerContract};
+use lib::{
+    kdf,
+    signer_contract::{MpcSignature, SignerContract},
+};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    near_bindgen, PromiseOrValue, PublicKey,
+    env, near_bindgen, PromiseOrValue, PublicKey,
 };
 
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug)]
@@ -11,8 +14,10 @@ struct Contract {}
 #[near_bindgen]
 impl SignerContract for Contract {
     fn sign(&mut self, payload: [u8; 32], path: &String) -> PromiseOrValue<MpcSignature> {
-        let _ = (payload, path);
-        PromiseOrValue::Value(MpcSignature::new([0; 32], [0; 32], 0))
+        let predecessor = env::predecessor_account_id();
+        let signing_key = kdf::construct_spoof_key(predecessor.as_bytes(), path.as_bytes());
+        let (sig, recid) = signing_key.sign_prehash_recoverable(&payload).unwrap();
+        PromiseOrValue::Value(MpcSignature::from_ecdsa_signature(sig, recid).unwrap())
     }
 
     fn public_key(&self) -> PublicKey {

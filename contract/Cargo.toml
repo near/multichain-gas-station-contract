@@ -1,0 +1,28 @@
+[package]
+authors = ["Jacob Lindahl <jacob.lindahl@near.org>"]
+name = "contract"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ethers-core.workspace = true
+hex.workspace = true
+lib = { path = "../lib" }
+near-sdk.workspace = true
+near-sdk-contract-tools.workspace = true
+schemars.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+near-workspaces = { version = "0.10", features = ["unstable"] }
+tokio = "1.28"
+
+[features]
+default = ["debug"]
+
+# enables functions only for testing purposes
+# NOT SAFE FOR PRODUCTION USE
+debug = ["lib/debug"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]

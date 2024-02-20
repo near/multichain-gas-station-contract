@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 near-sdk.workspace = true
-near-multichain-gas-station-contract = { path = "../../" }
+lib = { path = "../../lib" }
 
 [lib]
 crate-type = ["cdylib"]
