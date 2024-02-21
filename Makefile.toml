@@ -2,14 +2,20 @@
 workspace = false
 clear = true
 script = """
-cargo build --package near-multichain-gas-station-contract --target wasm32-unknown-unknown --release
+cargo build --package contract --target wasm32-unknown-unknown --release --no-default-features
+"""
+
+[tasks.build-debug]
+workspace = false
+script = """
+cargo build --package contract --target wasm32-unknown-unknown --release --features=debug
 """
 
 [tasks.test]
 workspace = false
 clear = true
 script = """
-mkdir -p target/near/{oracle,signer}
+mkdir -p target/near/{contract,oracle,signer}
 cargo test
 """
 
@@ -17,6 +23,15 @@ cargo test
 workspace = false
 clear = true
 script = """
-mkdir -p target/near/{oracle,signer}
+mkdir -p target/near/{contract,oracle,signer}
 cargo nextest run
 """
+
+[tasks.clear-contract]
+workspace = false
+script_runner = "@shell"
+script = '''
+ENTRIES=$(near contract view-storage canhazgas.testnet all as-json network-config testnet now)
+JSON="{\"entries\": $ENTRIES}"
+near contract call-function as-transaction canhazgas.testnet clear_storage json-args "$JSON" prepaid-gas '300.0 Tgas' attached-deposit '0 NEAR' sign-as
+'''
