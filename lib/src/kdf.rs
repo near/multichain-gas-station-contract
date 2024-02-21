@@ -34,7 +34,7 @@ const EPSILON_DERIVATION_PREFIX: &str = "near-mpc-recovery v0.1.0 epsilon deriva
 #[must_use]
 pub fn derive_epsilon(signer_id: &AccountId, path: &str) -> Scalar {
     let derivation_path = format!("{EPSILON_DERIVATION_PREFIX}{signer_id},{path}");
-    Scalar::from_uint_unchecked(U256::from_be_slice(&sha256(derivation_path.as_bytes())))
+    Scalar::from_uint_unchecked(U256::from_le_slice(&sha256(derivation_path.as_bytes())))
 }
 
 #[must_use]
@@ -139,7 +139,7 @@ pub fn construct_spoof_key(
 fn test_spoof() {
     use ethers_core::{types::transaction::eip2718::TypedTransaction, utils::rlp::Rlp};
 
-    use crate::signer_contract::MpcSignature;
+    use crate::signer::MpcSignature;
 
     let useless_public_key: near_sdk::PublicKey = "secp256k1:47xve2ymatpG4x4Gp7pmYwuLJk7eeRegrFuS4VoW5VV4i3GsBiBY87vkH6UZiiY18NeZnkBzcZzipDbJJ5pmjTcc"
         .parse()

@@ -1,6 +1,6 @@
 use lib::{
     kdf,
-    signer_contract::{MpcSignature, SignerContract},
+    signer::{MpcSignature, SignerInterface},
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
@@ -12,7 +12,7 @@ use near_sdk::{
 struct Contract {}
 
 #[near_bindgen]
-impl SignerContract for Contract {
+impl SignerInterface for Contract {
     fn sign(&mut self, payload: [u8; 32], path: &String) -> PromiseOrValue<MpcSignature> {
         let predecessor = env::predecessor_account_id();
         let signing_key = kdf::construct_spoof_key(predecessor.as_bytes(), path.as_bytes());

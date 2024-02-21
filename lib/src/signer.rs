@@ -20,7 +20,7 @@ use thiserror::Error;
 
 #[allow(clippy::ptr_arg)]
 #[ext_contract(ext_signer)]
-pub trait SignerContract {
+pub trait SignerInterface {
     fn sign(&mut self, payload: [u8; 32], path: &String) -> PromiseOrValue<MpcSignature>;
     fn public_key(&self) -> near_sdk::PublicKey;
 }

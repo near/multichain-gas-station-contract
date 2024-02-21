@@ -1,4 +1,4 @@
-// NOTE: If tests fail due to a directory not existing error, create `target/near/{oracle,signer}`
+// NOTE: If tests fail due to a directory not existing error, create `target/near/{contract,oracle,signer}`
 
 use contract::{
     chain_configuration::PaymasterConfiguration,
@@ -15,7 +15,7 @@ use ethers_core::{
     types::{transaction::eip2718::TypedTransaction, U256},
     utils::rlp::Rlp,
 };
-use lib::{foreign_address::ForeignAddress, signer_contract::MpcSignature};
+use lib::{foreign_address::ForeignAddress, signer::MpcSignature};
 use near_sdk::serde_json::json;
 use near_workspaces::{
     operations::Function,

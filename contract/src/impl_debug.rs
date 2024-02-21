@@ -1,5 +1,7 @@
 use std::str::FromStr;
 
+use lib::kdf;
+use lib::signer::{MpcSignature, SignerInterface};
 use near_sdk::{
     env,
     json_types::{Base64VecU8, U64},
@@ -9,12 +11,8 @@ use near_sdk::{
     AccountId, PromiseOrValue,
 };
 use near_sdk_contract_tools::owner::Owner;
-use lib::kdf;
-use lib::signer_contract::{MpcSignature, SignerContract};
 
-use crate::{
-    Contract, ContractExt, Flags, StorageKey, DEFAULT_EXPIRE_SEQUENCE_IN_NS,
-};
+use crate::{Contract, ContractExt, Flags, StorageKey, DEFAULT_EXPIRE_SEQUENCE_IN_NS};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
@@ -61,7 +59,7 @@ impl Contract {
 }
 
 #[near_bindgen]
-impl SignerContract for Contract {
+impl SignerInterface for Contract {
     fn public_key(&self) -> near_sdk::PublicKey {
         near_sdk::PublicKey::from_str("secp256k1:4HFcTSodRLVCGNVcGc4Mf2fwBBBxv9jxkGdiW2S2CA1y6UpVVRWKj6RX7d7TDt65k2Bj3w9FU4BGtt43ZvuhCnNt").unwrap()
     }

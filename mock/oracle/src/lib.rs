@@ -1,4 +1,4 @@
-use lib::oracle::{AssetOptionalPrice, Oracle, Price, PriceData};
+use lib::oracle::{AssetOptionalPrice, OracleInterface, Price, PriceData};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, near_bindgen,
@@ -9,7 +9,7 @@ use near_sdk::{
 struct Contract {}
 
 #[near_bindgen]
-impl Oracle for Contract {
+impl OracleInterface for Contract {
     fn get_price_data(&self, asset_ids: Option<Vec<String>>) -> PriceData {
         let _ = asset_ids;
 

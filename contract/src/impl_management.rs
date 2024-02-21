@@ -21,7 +21,7 @@ use lib::{
     foreign_address::ForeignAddress,
     kdf::get_mpc_address,
     oracle::PriceData,
-    signer_contract::ext_signer,
+    signer::ext_signer,
 };
 
 #[allow(clippy::needless_pass_by_value)]

@@ -1,8 +1,9 @@
 pub mod foreign_address;
 pub mod kdf;
 pub mod oracle;
-pub mod signer_contract;
+pub mod signer;
 
+#[cfg(target_arch = "wasm32")]
 mod custom_getrandom {
     #![allow(clippy::no_mangle_with_rust_abi)]
 

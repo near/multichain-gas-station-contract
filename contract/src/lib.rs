@@ -5,7 +5,7 @@ use ethers_core::{
 use lib::foreign_address::ForeignAddress;
 use lib::kdf::get_mpc_address;
 use lib::oracle::{ext_oracle, PriceData};
-use lib::signer_contract::{ext_signer, MpcSignature};
+use lib::signer::{ext_signer, MpcSignature};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,

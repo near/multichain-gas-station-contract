@@ -30,7 +30,7 @@ pub struct PriceData {
 }
 
 #[ext_contract(ext_oracle)]
-pub trait Oracle {
+pub trait OracleInterface {
     fn get_price_data(&self, asset_ids: Option<Vec<String>>) -> PriceData;
 }
 
