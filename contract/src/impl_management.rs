@@ -12,16 +12,13 @@ use near_sdk_contract_tools::owner::{Owner, OwnerExternal};
 
 use crate::{
     asset::AssetId,
-    chain_configuration::{ChainConfiguration, PaymasterConfiguration},
+    chain_configuration::{ChainConfiguration, PaymasterConfiguration, ViewPaymasterConfiguration},
     decode_transaction_request,
     valid_transaction_request::ValidTransactionRequest,
     Contract, ContractExt, Flags, GetForeignChain, PendingTransactionSequence, StorageKey,
 };
 use lib::{
-    foreign_address::ForeignAddress,
-    kdf::get_mpc_address,
-    oracle::PriceData,
-    signer::ext_signer,
+    foreign_address::ForeignAddress, kdf::get_mpc_address, oracle::PriceData, signer::ext_signer,
 };
 
 #[allow(clippy::needless_pass_by_value)]
@@ -280,12 +277,23 @@ impl Contract {
         }
     }
 
-    pub fn get_paymasters(&self, chain_id: U64) -> Vec<&PaymasterConfiguration> {
+    pub fn get_paymasters(&self, chain_id: U64) -> Vec<ViewPaymasterConfiguration> {
         self.foreign_chains
             .get(&chain_id.0)
             .unwrap_or_else(|| env::panic_str("Foreign chain does not exist"))
             .paymasters
             .iter()
+            .map(|p| ViewPaymasterConfiguration {
+                nonce: p.nonce,
+                key_path: p.key_path.clone(),
+                foreign_address: get_mpc_address(
+                    self.signer_contract_public_key.clone().unwrap(),
+                    &env::current_account_id(),
+                    &p.key_path,
+                )
+                .unwrap(),
+                minimum_available_balance: U256(p.minimum_available_balance).as_u128().into(),
+            })
             .collect()
     }
 

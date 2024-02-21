@@ -1,11 +1,15 @@
 use ethers_core::types::U256;
+use lib::{
+    foreign_address::ForeignAddress,
+    oracle::{process_oracle_result, PriceData},
+};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
+    json_types::U128,
     serde::{Deserialize, Serialize},
     store::Vector,
 };
 use schemars::JsonSchema;
-use lib::oracle::{process_oracle_result, PriceData};
 
 #[derive(
     Serialize,
@@ -31,6 +35,15 @@ impl PaymasterConfiguration {
         self.nonce += 1;
         nonce
     }
+}
+
+#[derive(Serialize, JsonSchema, Debug, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ViewPaymasterConfiguration {
+    pub nonce: u32,
+    pub key_path: String,
+    pub foreign_address: ForeignAddress,
+    pub minimum_available_balance: U128,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]

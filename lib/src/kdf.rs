@@ -113,12 +113,12 @@ pub fn get_mpc_address(
 #[cfg(feature = "debug")]
 pub fn get_mpc_address(
     _mpc_public_key: near_sdk::PublicKey,
-    gas_station_account_id: &AccountId,
-    caller_account_id: &str,
+    predecessor_account_id: &AccountId,
+    path: &str,
 ) -> Result<ForeignAddress, PublicKeyConversionError> {
     let signing_key = construct_spoof_key(
-        gas_station_account_id.as_bytes(),
-        caller_account_id.as_bytes(),
+        predecessor_account_id.as_bytes(),
+        path.as_bytes(),
     );
     Ok(ethers_core::utils::secret_key_to_address(&signing_key).into())
 }

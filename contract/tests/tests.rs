@@ -190,7 +190,7 @@ async fn test() {
 #[ignore = "generate a payload signable by the contract"]
 fn generate_eth_rlp_hex() {
     let eth_transaction = ethers_core::types::transaction::eip1559::Eip1559TransactionRequest {
-        chain_id: Some(97.into()),
+        chain_id: Some(0.into()),
         from: None,
         to: Some(ForeignAddress([0x0f; 20]).into()),
         data: None,
@@ -207,37 +207,12 @@ fn generate_eth_rlp_hex() {
 
 #[test]
 fn decode_rlp() {
-    // ["f865118222b8825208941345301adbfb8d0ca0ddda64a68c4dfbdbd28e408416400b808080a0ee5aca1ea8216f98ff7743395b4caa21a8423146eb7e5e13e12385af124faf37a0bae88f6a08d0f042ddd3f68bfa659e75d4cda2ea6c7a9ca4b0511bc8fc4c2c34","f865821e618222b882520894abababababababababababababababababababab8204d28080a0b5aa8dafdc148ce9d6f9f12dc90abf11d1536db7f32a4b0b448d06024724bc84a016c61437de5c61c7f444943ac048917123bb92afa425f4b2c2da4ec1d9c8c907"]
-
-    // first run:
-    // paymaster tx from: 0x64cb2dee943db6b4a6a8f94c4e3eb81c44ca6c7f
-    // paymaster tx to: 0x1345301adbfb8d0ca0ddda64a68c4dfbdbd28e40
-    // user tx from: 0xf5c0d04504e796f2624cead901fae85c976ae8bd
-    // public key: secp256k1:4HFcTSodRLVCGNVcGc4Mf2fwBBBxv9jxkGdiW2S2CA1y6UpVVRWKj6RX7d7TDt65k2Bj3w9FU4BGtt43ZvuhCnNt
-
-    // second run:
-    // first signed tx: f865128222b8825208941345301adbfb8d0ca0ddda64a68c4dfbdbd28e408416400b808001a0169f52f79fe6a7b322517882823c6caf64d463a35723c284e206f4e7ba9eb3d7a082104850ae0eb2407ec69df9cc4e977c33d1463a6c3f1f197a946e60be64981d
-    // paymaster tx from: 0x286364ce3fe69909ecf201e8821280c26e413aea
-    // paymaster tx to: 0x1345301adbfb8d0ca0ddda64a68c4dfbdbd28e40
-    // second signed tx: f865821e618222b882520894ababababababababababababababababababadab8204d28080a0ca4c7d5b033891493f5494e078a59dddab4c358cf253308f19c9a37461678360a0820dd725e347a938695a9c0e4335895f4ceb9098249a5a8c10ee580121250022
-    // user tx from: 0x812a6d0652e09f8df6a7754c6b1933a33ea42fc1
-
-    // third run:
-    // first signed tx: f865138222b8825208941345301adbfb8d0ca0ddda64a68c4dfbdbd28e408416400b808080a0ba93727e4d2dad388a90b04c3e7bf215ed90cd63fddb7247a8a5ea6cd81079c8a0250367f4c84ca019bfecd3bb2bf7bac9b4c9211425b0b1c553e63dd6592b5759
-    // paymaster tx from: 0xc0a7a1648d2debf28cc29fef377a625b525f44bd
-    // paymaster tx to: 0x1345301adbfb8d0ca0ddda64a68c4dfbdbd28e40
-    // second signed tx: f865821e618222b882520894ababababababababababababababababababaeab8204d28080a00cfd42288ba70701554a0db9b93cc16f90b2440337d4867b1a14571825bc270aa0c2eaa1679b17fc5d66ddbaba5c7cd872dcd8349c4f5000071f31bfe4bdc9e41b
-    // user tx from: 0x3ba43fc3d28621214161161a3794df820b31a7f6
-
-    // fourth run (payload identical to third run):
-    // first signed tx: f865138222b8825208941345301adbfb8d0ca0ddda64a68c4dfbdbd28e408416400b808001a0206e5d105365a448fa0eece7fff0b0b9c2284e921484601cfc74795a12082f3fa0ef066672f6e83d96eefc890c7164d6f683048127a2bc8243597b5fb3fd5e717c
-    // paymaster tx from: 0x53929a94d243578da370c961832075f98cea2785
-    // paymaster tx to: 0x1345301adbfb8d0ca0ddda64a68c4dfbdbd28e40
-    // second signed tx: f865821e618222b882520894ababababababababababababababababababaeab8204d28080a068f8c262d95b98275eddd7ba2d8ff272919724681a9f53342d5b2dd066de20fca0d86d8655f90fcd29212d2eb18b22419cbf48692b18881e51d1b1eba46aea992e
-    // user tx from: 0x7b7696549651f63f2e6b112acabd2cdc9ceb2796
+    // predicted address: 0x6D9BE8798fE027ea82f24d56b4Bea9B64BbBa54E
+    // paymaster tx: 02f86a80808204d28204d2825208946d9be8798fe027ea82f24d56b4bea9b64bbba54e840316d52080c080a0f202ff2ce70dc105a881c782d68005b4260d8c31f42926b593e6632694214915a05b900840d0c04bcddceef7eb309751d048dc043160feaf0ae8ebde2ca6e151f8
+    // user tx: 02f86a80821e618204d28204d2825208940f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f8204d280c080a0ddd9137ccc2b51220a51de20a0780f0fbff5c1cc715b29b11a500416b2f9e75da00edff5b1a1f02d4ce1937e024b7545f5a87b89b615cb2130bd87a890ba87358d
 
     let bytes = hex::decode(
-        "f865821e618222b882520894ababababababababababababababababababaeab8204d28080a068f8c262d95b98275eddd7ba2d8ff272919724681a9f53342d5b2dd066de20fca0d86d8655f90fcd29212d2eb18b22419cbf48692b18881e51d1b1eba46aea992e",
+        "02f86a80821e618204d28204d2825208940f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f8204d280c080a0ddd9137ccc2b51220a51de20a0780f0fbff5c1cc715b29b11a500416b2f9e75da00edff5b1a1f02d4ce1937e024b7545f5a87b89b615cb2130bd87a890ba87358d",
     )
     .unwrap();
 
