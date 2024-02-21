@@ -232,7 +232,9 @@ impl Contract {
     }
 
     pub fn set_paymaster_balance(&mut self, chain_id: U64, index: u32, balance: U128) {
+        #[cfg(not(feature = "debug"))]
         self.assert_owner();
+
         let chain = self
             .foreign_chains
             .get_mut(&chain_id.0)
@@ -246,7 +248,9 @@ impl Contract {
     }
 
     pub fn set_paymaster_nonce(&mut self, chain_id: U64, index: u32, nonce: u32) {
+        #[cfg(not(feature = "debug"))]
         self.assert_owner();
+
         let chain = self
             .foreign_chains
             .get_mut(&chain_id.0)
