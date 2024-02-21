@@ -116,10 +116,7 @@ pub fn get_mpc_address(
     predecessor_account_id: &AccountId,
     path: &str,
 ) -> Result<ForeignAddress, PublicKeyConversionError> {
-    let signing_key = construct_spoof_key(
-        predecessor_account_id.as_bytes(),
-        path.as_bytes(),
-    );
+    let signing_key = construct_spoof_key(predecessor_account_id.as_bytes(), path.as_bytes());
     Ok(ethers_core::utils::secret_key_to_address(&signing_key).into())
 }
 

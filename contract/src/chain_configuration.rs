@@ -37,7 +37,7 @@ impl PaymasterConfiguration {
     }
 }
 
-#[derive(Serialize, JsonSchema, Debug, Clone)]
+#[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
 pub struct ViewPaymasterConfiguration {
     pub nonce: u32,

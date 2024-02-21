@@ -12,7 +12,7 @@ use near_sdk::{
     json_types::{U128, U64},
     near_bindgen, require,
     serde::{Deserialize, Serialize},
-    store::{UnorderedMap, UnorderedSet},
+    store::{UnorderedMap, UnorderedSet, Vector},
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
 #[allow(clippy::wildcard_imports)]
@@ -26,7 +26,7 @@ pub mod chain_configuration;
 use chain_configuration::ChainConfiguration;
 
 pub mod contract_event;
-use contract_event::ContractEvent;
+use contract_event::{ContractEvent, TransactionSequenceCreated, TransactionSequenceSigned};
 
 #[cfg(feature = "debug")]
 mod impl_debug;
@@ -39,7 +39,7 @@ use valid_transaction_request::ValidTransactionRequest;
 pub mod signature_request;
 use signature_request::{SignatureRequest, Status};
 
-const DEFAULT_EXPIRE_SEQUENCE_IN_NS: u64 = 5 * 60 * 1_000_000_000; // 5 minutes
+const DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS: u64 = 5 * 60; // 5ish minutes at 1s/block
 
 #[derive(
     BorshSerialize,
@@ -83,12 +83,22 @@ pub struct GetForeignChain {
     pub oracle_asset_id: String,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, BorshSerialize, BorshDeserialize, Clone, Debug)]
+#[derive(
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    BorshSerialize,
+    BorshDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+)]
 #[serde(crate = "near_sdk::serde")]
 pub struct PendingTransactionSequence {
-    pub created_by_id: AccountId,
+    pub created_by_account_id: AccountId,
     pub signature_requests: Vec<SignatureRequest>,
-    pub created_at_block_timestamp_ns: U64,
+    pub created_at_block_height: U64,
     pub escrow: Option<AssetBalance>,
 }
 
@@ -100,14 +110,21 @@ impl PendingTransactionSequence {
     }
 }
 
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct TransactionSequenceSignedEventAt {
+    pub block_height: u64,
+    pub event: contract_event::TransactionSequenceSigned,
+}
+
 #[derive(BorshSerialize, BorshDeserialize, BorshStorageKey, Hash, Clone, Debug, PartialEq, Eq)]
 pub enum StorageKey {
     SenderWhitelist,
     ReceiverWhitelist,
     ForeignChains,
     Paymasters(u64),
-    PendingTransactions,
+    PendingTransactionSequences,
     CollectedFees,
+    SignedTransactionSequences,
 }
 
 // TODO: Pausability
@@ -122,11 +139,13 @@ pub struct Contract {
     pub oracle_id: AccountId,
     pub oracle_local_asset_id: String,
     pub flags: Flags,
-    pub expire_sequence_after_ns: u64,
+    pub expire_sequence_after_blocks: u64,
     pub foreign_chains: UnorderedMap<u64, ChainConfiguration>,
     pub sender_whitelist: UnorderedSet<AccountId>,
     pub receiver_whitelist: UnorderedSet<ForeignAddress>,
     pub pending_transaction_sequences: UnorderedMap<u64, PendingTransactionSequence>,
+    /// TODO: Hopefully temporary measure to eliminate the need for an indexer.
+    pub signed_transaction_sequences: Vector<TransactionSequenceSignedEventAt>,
     pub collected_fees: UnorderedMap<AssetId, U128>,
 }
 
@@ -138,7 +157,7 @@ impl Contract {
         signer_contract_id: AccountId,
         oracle_id: AccountId,
         oracle_local_asset_id: String,
-        expire_sequence_after_ns: Option<U64>,
+        expire_sequence_after_blocks: Option<U64>,
     ) -> Self {
         let mut contract = Self {
             next_unique_id: 0,
@@ -147,12 +166,15 @@ impl Contract {
             oracle_id,
             oracle_local_asset_id,
             flags: Flags::default(),
-            expire_sequence_after_ns: expire_sequence_after_ns
-                .map_or(DEFAULT_EXPIRE_SEQUENCE_IN_NS, u64::from),
+            expire_sequence_after_blocks: expire_sequence_after_blocks
+                .map_or(DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS, u64::from),
             foreign_chains: UnorderedMap::new(StorageKey::ForeignChains),
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
-            pending_transaction_sequences: UnorderedMap::new(StorageKey::PendingTransactions),
+            pending_transaction_sequences: UnorderedMap::new(
+                StorageKey::PendingTransactionSequences,
+            ),
+            signed_transaction_sequences: Vector::new(StorageKey::SignedTransactionSequences),
             collected_fees: UnorderedMap::new(StorageKey::CollectedFees),
         };
 
@@ -256,15 +278,15 @@ impl Contract {
 
             let pending_transaction_sequence = PendingTransactionSequence {
                 signature_requests: vec![SignatureRequest::new(&predecessor, transaction, false)],
-                created_by_id: predecessor,
-                created_at_block_timestamp_ns: env::block_timestamp().into(),
+                created_by_account_id: predecessor,
+                created_at_block_height: env::block_height().into(),
                 escrow: None,
             };
 
-            ContractEvent::TransactionSequenceCreated {
+            ContractEvent::TransactionSequenceCreated(TransactionSequenceCreated {
                 foreign_chain_id: chain_id.to_string(),
                 pending_transaction_sequence: pending_transaction_sequence.clone(),
-            }
+            })
             .emit();
 
             PromiseOrValue::Value(self.insert_pending_transaction(pending_transaction_sequence))
@@ -358,15 +380,15 @@ impl Contract {
 
         let pending_transaction_sequence = PendingTransactionSequence {
             signature_requests,
-            created_by_id: sender,
-            created_at_block_timestamp_ns: env::block_timestamp().into(),
+            created_by_account_id: sender,
+            created_at_block_height: env::block_height().into(),
             escrow: Some(AssetBalance::native(fee)),
         };
 
-        ContractEvent::TransactionSequenceCreated {
+        ContractEvent::TransactionSequenceCreated(TransactionSequenceCreated {
             foreign_chain_id: chain_id.to_string(),
             pending_transaction_sequence: pending_transaction_sequence.clone(),
-        }
+        })
         .emit();
 
         self.insert_pending_transaction(pending_transaction_sequence)
@@ -384,14 +406,14 @@ impl Contract {
 
         // ensure not expired
         require!(
-            env::block_timestamp()
-                <= self.expire_sequence_after_ns + transaction.created_at_block_timestamp_ns.0,
+            env::block_height()
+                <= self.expire_sequence_after_blocks + transaction.created_at_block_height.0,
             "Transaction is expired",
         );
 
         // ensure only signed by original creator
         require!(
-            transaction.created_by_id == env::predecessor_account_id(),
+            transaction.created_by_account_id == env::predecessor_account_id(),
             "Predecessor must be the transaction creator",
         );
 
@@ -486,15 +508,23 @@ impl Contract {
             });
 
         if let Some(all_signatures) = all_signatures {
-            ContractEvent::TransactionSequenceSigned {
+            let e = TransactionSequenceSigned {
                 foreign_chain_id: chain_id.to_string(),
-                sender_local_address: pending_transaction_sequence.created_by_id.clone(),
+                created_by_account_id: pending_transaction_sequence.created_by_account_id.clone(),
                 signed_transactions: all_signatures
                     .into_iter()
                     .map(|(t, s)| hex::encode(t.into_typed_transaction().rlp_signed(&s.into())))
                     .collect(),
-            }
-            .emit();
+            };
+
+            self.signed_transaction_sequences
+                .push(TransactionSequenceSignedEventAt {
+                    block_height: env::block_height(),
+                    event: e.clone(),
+                });
+
+            ContractEvent::TransactionSequenceSigned(e).emit();
+
             // Remove transaction if all requests have been signed
             // TODO: Is this over-eager?
             self.pending_transaction_sequences.remove(&id);
@@ -510,7 +540,7 @@ impl Contract {
             .unwrap_or_else(|| env::panic_str("Transaction not found"));
 
         require!(
-            transaction.created_by_id == env::predecessor_account_id(),
+            transaction.created_by_account_id == env::predecessor_account_id(),
             "Unauthorized"
         );
 
@@ -528,7 +558,7 @@ impl Contract {
                 PromiseOrValue::Promise(
                     escrow
                         .asset_id
-                        .transfer(transaction.created_by_id.clone(), escrow.amount),
+                        .transfer(transaction.created_by_account_id.clone(), escrow.amount),
                 )
             });
 

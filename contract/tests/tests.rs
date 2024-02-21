@@ -1,21 +1,11 @@
 // NOTE: If tests fail due to a directory not existing error, create `target/near/{contract,oracle,signer}`
 
 use contract::{
-    chain_configuration::PaymasterConfiguration,
-    valid_transaction_request::ValidTransactionRequest, TransactionCreation,
+    chain_configuration::ViewPaymasterConfiguration, contract_event::TransactionSequenceSigned,
+    TransactionCreation,
 };
-use ethers_core::{
-    k256::{
-        ecdsa::RecoveryId,
-        elliptic_curve::{
-            bigint::Uint, group::GroupEncoding, ops::Reduce, point::AffineCoordinates,
-            scalar::FromUintUnchecked, PrimeField,
-        },
-    },
-    types::{transaction::eip2718::TypedTransaction, U256},
-    utils::rlp::Rlp,
-};
-use lib::{foreign_address::ForeignAddress, signer::MpcSignature};
+use ethers_core::{types::transaction::eip2718::TypedTransaction, utils::rlp::Rlp};
+use lib::foreign_address::ForeignAddress;
 use near_sdk::serde_json::json;
 use near_workspaces::{
     operations::Function,
@@ -23,7 +13,7 @@ use near_workspaces::{
 };
 
 #[tokio::test]
-async fn test() {
+async fn test_workflow_happy_path() {
     let w = near_workspaces::sandbox().await.unwrap();
 
     let (gas_station, oracle, signer) = tokio::join!(
@@ -89,17 +79,17 @@ async fn test() {
         }))
         .await
         .unwrap()
-        .json::<Vec<PaymasterConfiguration>>()
+        .json::<Vec<ViewPaymasterConfiguration>>()
         .unwrap();
 
+    let result = &result[0];
+
+    assert_eq!(result.nonce, 0);
     assert_eq!(
-        result,
-        vec![PaymasterConfiguration {
-            nonce: 0,
-            minimum_available_balance: U256::from(100000000).0,
-            key_path: "$".to_string()
-        }]
+        result.minimum_available_balance,
+        near_sdk::json_types::U128(100000000),
     );
+    assert_eq!(result.key_path, "$".to_string());
 
     let alice = w.dev_create_account().await.unwrap();
 
@@ -180,10 +170,32 @@ async fn test() {
         .json::<ForeignAddress>()
         .unwrap();
 
-    let signed_transaction_bytes = hex::decode(signed_tx_2).unwrap();
+    let signed_transaction_bytes = hex::decode(&signed_tx_2).unwrap();
     let signed_transaction_rlp = Rlp::new(&signed_transaction_bytes);
     let (tx, _s) = TypedTransaction::decode_signed(&signed_transaction_rlp).unwrap();
     assert_eq!(alice_foreign_address, tx.from().unwrap().into());
+
+    let signed_transaction_sequences = gas_station
+        .view("list_signed_transaction_sequences_after")
+        .args_json(json!({
+            "block_height": "0",
+        }))
+        .await
+        .unwrap()
+        .json::<Vec<TransactionSequenceSigned>>()
+        .unwrap();
+
+    assert_eq!(
+        signed_transaction_sequences,
+        vec![TransactionSequenceSigned {
+            foreign_chain_id: "0".to_string(),
+            created_by_account_id: alice.id().as_str().parse().unwrap(),
+            signed_transactions: vec![signed_tx_1, signed_tx_2],
+        }]
+    );
+
+    println!("List of signed transactions:");
+    println!("{:?}", signed_transaction_sequences);
 }
 
 #[test]
@@ -223,74 +235,4 @@ fn decode_rlp() {
     let txrq = TypedTransaction::decode_signed(&rlp).unwrap();
 
     println!("{txrq:?}");
-}
-
-#[test]
-fn parse_signature() {
-    let t: ValidTransactionRequest = near_sdk::serde_json::from_value(json!({
-        "receiver": "0x0505050505050505050505050505050505050505",
-        "gas": [21000, 0, 0, 0],
-        "gas_price": [120, 0, 0, 0],
-        "value": [100, 0, 0, 0],
-        "data": [],
-        "nonce": [0, 0, 0, 0],
-        "chain_id": 0
-    }))
-    .unwrap();
-    let t = t.into_typed_transaction();
-
-    let big_r_hex = "0333D5EF8C991EC82B9A6B38B7F7CA91BA34EC814C9EEC1E2A42E4FC4FC9C443F7";
-    let s_hex = "675E56A82D9464D1CBA7EF62D7B9D6E1A4B87328C610B28DFC4B81815F8969D0";
-
-    let big_r =
-        ethers_core::k256::AffinePoint::from_bytes(hex::decode(big_r_hex).unwrap()[..].into())
-            .unwrap();
-    let s = ethers_core::k256::Scalar::from_uint_unchecked(Uint::<4>::from_be_slice(
-        &hex::decode(s_hex).unwrap(),
-    ));
-
-    // let sighash = t.sighash();
-
-    // let payload = [
-    //     176u8, 195, 16, 129, 80, 137, 0, 103, 216, 40, 196, 132, 138, 70, 118, 139, 64, 4, 152,
-    //     120, 159, 184, 101, 18, 239, 220, 197, 83, 151, 228, 188, 218,
-    // ];
-
-    // assert_eq!(&sighash[..], payload.as_slice());
-
-    let r = <ethers_core::k256::Scalar as Reduce<Uint<4>>>::reduce_bytes(&big_r.x());
-    let x_is_reduced = r.to_repr() != big_r.x();
-
-    let v = RecoveryId::new(big_r.y_is_odd().into(), x_is_reduced);
-
-    let signature = ethers_core::types::Signature {
-        r: r.to_bytes().as_slice().into(),
-        s: s.to_bytes().as_slice().into(),
-        v: v.to_byte().into(),
-    };
-
-    println!("signature: {signature:?}");
-
-    let signed_rlp_bytes = t.rlp_signed(&signature);
-
-    let rlp = Rlp::new(&signed_rlp_bytes);
-
-    println!("0x{:x}", signed_rlp_bytes);
-
-    let res = TypedTransaction::decode_signed(&rlp).unwrap();
-
-    println!("{res:?}");
-
-    let sig2: ethers_core::types::Signature =
-        MpcSignature(big_r_hex.to_string(), s_hex.to_string())
-            .try_into()
-            .unwrap();
-
-    assert_eq!(sig2, signature);
-
-    // let address =
-    //     ethers_core::utils::parse_checksummed("0xC5acB93D901fb260359Cd1e982998236Cfac65E0", None)
-    //         .unwrap();
-
-    // signature.verify(payload, address).unwrap();
 }

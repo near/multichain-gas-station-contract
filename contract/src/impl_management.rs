@@ -13,6 +13,7 @@ use near_sdk_contract_tools::owner::{Owner, OwnerExternal};
 use crate::{
     asset::AssetId,
     chain_configuration::{ChainConfiguration, PaymasterConfiguration, ViewPaymasterConfiguration},
+    contract_event::TransactionSequenceSigned,
     decode_transaction_request,
     valid_transaction_request::ValidTransactionRequest,
     Contract, ContractExt, Flags, GetForeignChain, PendingTransactionSequence, StorageKey,
@@ -24,13 +25,13 @@ use lib::{
 #[allow(clippy::needless_pass_by_value)]
 #[near_bindgen]
 impl Contract {
-    pub fn get_expire_sequence_after_ns(&self) -> U64 {
-        self.expire_sequence_after_ns.into()
+    pub fn get_expire_sequence_after_blocks(&self) -> U64 {
+        self.expire_sequence_after_blocks.into()
     }
 
-    pub fn set_expire_sequence_after_ns(&mut self, expire_sequence_after_ns: U64) {
+    pub fn set_expire_sequence_after_blocks(&mut self, expire_sequence_after_blocks: U64) {
         self.assert_owner();
-        self.expire_sequence_after_ns = expire_sequence_after_ns.into();
+        self.expire_sequence_after_blocks = expire_sequence_after_blocks.into();
     }
 
     pub fn get_signer_contract_id(&self) -> &AccountId {
@@ -263,9 +264,9 @@ impl Contract {
         paymaster.nonce = nonce;
     }
 
-    /// Note: If a transaction is _already_ pending signatures with the
-    /// paymaster getting removed, this method will not prevent those payloads
-    /// from getting signed.
+    /// Note: If a transaction sequence is _already_ pending signatures with
+    /// the paymaster getting removed, this method will not prevent those
+    /// payloads from getting signed.
     pub fn remove_paymaster(&mut self, chain_id: U64, index: u32) {
         self.assert_owner();
         let chain = self
@@ -301,7 +302,7 @@ impl Contract {
             .collect()
     }
 
-    pub fn list_transactions(
+    pub fn list_pending_transaction_sequences(
         &self,
         offset: Option<u32>,
         limit: Option<u32>,
@@ -317,8 +318,23 @@ impl Contract {
             .collect()
     }
 
-    pub fn get_transaction(&self, id: U64) -> Option<&PendingTransactionSequence> {
+    pub fn get_pending_transaction_sequence(&self, id: U64) -> Option<&PendingTransactionSequence> {
         self.pending_transaction_sequences.get(&id.0)
+    }
+
+    pub fn list_signed_transaction_sequences_after(
+        &self,
+        block_height: U64,
+        offset: Option<u32>,
+        limit: Option<u32>,
+    ) -> Vec<&TransactionSequenceSigned> {
+        self.signed_transaction_sequences
+            .iter()
+            .skip_while(|s| s.block_height < block_height.0)
+            .skip(offset.map_or(0, |o| o as usize))
+            .take(limit.map_or(usize::MAX, |l| l as usize))
+            .map(|s| &s.event)
+            .collect()
     }
 
     pub fn withdraw_collected_fees(

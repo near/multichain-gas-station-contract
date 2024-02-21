@@ -40,7 +40,17 @@ impl AssetId {
     }
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, BorshSerialize, BorshDeserialize, Clone, Debug)]
+#[derive(
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    BorshSerialize,
+    BorshDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+)]
 #[serde(crate = "near_sdk::serde")]
 pub struct AssetBalance {
     pub asset_id: AssetId,

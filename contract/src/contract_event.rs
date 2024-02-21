@@ -1,4 +1,8 @@
-use near_sdk::AccountId;
+use near_sdk::{
+    borsh::{self, BorshDeserialize, BorshSerialize},
+    serde::{Deserialize, Serialize},
+    AccountId,
+};
 use near_sdk_contract_tools::event;
 
 use crate::PendingTransactionSequence;
@@ -11,13 +15,21 @@ use crate::PendingTransactionSequence;
 /// within the contract.
 #[event(version = "0.1.0", standard = "x-gas-station")]
 pub enum ContractEvent {
-    TransactionSequenceCreated {
-        foreign_chain_id: String,
-        pending_transaction_sequence: PendingTransactionSequence,
-    },
-    TransactionSequenceSigned {
-        foreign_chain_id: String,
-        sender_local_address: AccountId,
-        signed_transactions: Vec<String>,
-    },
+    TransactionSequenceCreated(TransactionSequenceCreated),
+    TransactionSequenceSigned(TransactionSequenceSigned),
+}
+
+#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(crate = "near_sdk::serde")]
+pub struct TransactionSequenceCreated {
+    pub foreign_chain_id: String,
+    pub pending_transaction_sequence: PendingTransactionSequence,
+}
+
+#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(crate = "near_sdk::serde")]
+pub struct TransactionSequenceSigned {
+    pub foreign_chain_id: String,
+    pub created_by_account_id: AccountId,
+    pub signed_transactions: Vec<String>,
 }
