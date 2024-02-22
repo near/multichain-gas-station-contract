@@ -1,6 +1,9 @@
 use ethers_core::{
     types::{transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, U256},
-    utils::rlp::{Decodable, Rlp},
+    utils::{
+        hex::{self},
+        rlp::{Decodable, Rlp},
+    },
 };
 use lib::foreign_address::ForeignAddress;
 use lib::kdf::get_mpc_address;
@@ -513,7 +516,9 @@ impl Contract {
                 created_by_account_id: pending_transaction_sequence.created_by_account_id.clone(),
                 signed_transactions: all_signatures
                     .into_iter()
-                    .map(|(t, s)| hex::encode(t.into_typed_transaction().rlp_signed(&s.into())))
+                    .map(|(t, s)| {
+                        hex::encode_prefixed(t.into_typed_transaction().rlp_signed(&s.into()))
+                    })
                     .collect(),
             };
 
@@ -530,7 +535,7 @@ impl Contract {
             self.pending_transaction_sequences.remove(&id);
         }
 
-        hex::encode(&rlp_signed)
+        hex::encode_prefixed(&rlp_signed)
     }
 
     pub fn remove_transaction(&mut self, id: U64) -> PromiseOrValue<()> {

@@ -4,7 +4,10 @@ use contract::{
     chain_configuration::ViewPaymasterConfiguration, contract_event::TransactionSequenceSigned,
     TransactionCreation,
 };
-use ethers_core::{types::transaction::eip2718::TypedTransaction, utils::rlp::Rlp};
+use ethers_core::{
+    types::transaction::eip2718::TypedTransaction,
+    utils::{hex, rlp::Rlp},
+};
 use lib::foreign_address::ForeignAddress;
 use near_sdk::serde_json::json;
 use near_workspaces::{
@@ -111,7 +114,7 @@ async fn test_workflow_happy_path() {
     let tx = alice
         .call(gas_station.id(), "create_transaction")
         .args_json(json!({
-            "transaction_rlp_hex": hex::encode(&eth_transaction.rlp()),
+            "transaction_rlp_hex": hex::encode_prefixed(&eth_transaction.rlp()),
             "use_paymaster": true,
         }))
         .deposit(NearToken::from_near(1))
@@ -214,7 +217,7 @@ fn generate_eth_rlp_hex() {
         nonce: Some(7777.into()),
     };
 
-    println!("{}", hex::encode(eth_transaction.rlp()));
+    println!("{}", hex::encode_prefixed(eth_transaction.rlp()));
 }
 
 #[test]

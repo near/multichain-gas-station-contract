@@ -4,7 +4,6 @@ members = ["contract", "lib", "mock/*"]
 
 [workspace.dependencies]
 ethers-core = "2.0.13"
-hex = "0.4"
 near-sdk = { version = "4.1.1", default-features = false, features = [
     "wee_alloc",
     "legacy",

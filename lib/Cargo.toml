@@ -8,7 +8,6 @@ ethers-core.workspace = true
 getrandom = { version = "0.2", features = [
     "custom",
 ] } # make this package happy for wasm target
-hex.workspace = true
 near-sdk.workspace = true
 schemars.workspace = true
 thiserror.workspace = true

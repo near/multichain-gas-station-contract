@@ -6,7 +6,6 @@ edition = "2021"
 
 [dependencies]
 ethers-core.workspace = true
-hex.workspace = true
 lib = { path = "../lib" }
 near-sdk.workspace = true
 near-sdk-contract-tools.workspace = true
