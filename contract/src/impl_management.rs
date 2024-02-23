@@ -20,6 +20,7 @@ use crate::{
 };
 use lib::{
     foreign_address::ForeignAddress, kdf::get_mpc_address, oracle::PriceData, signer::ext_signer,
+    Rejectable,
 };
 
 #[allow(clippy::needless_pass_by_value)]
@@ -81,9 +82,9 @@ impl Contract {
         &mut self,
         #[callback_result] public_key: Result<near_sdk::PublicKey, PromiseError>,
     ) {
-        let public_key = public_key.unwrap_or_else(|_| {
-            env::panic_str("Failed to load signer public key from the signer contract")
-        });
+        let public_key = public_key
+            .ok()
+            .expect_or_reject("Failed to load signer public key from the signer contract");
         self.signer_contract_public_key = Some(public_key);
     }
 
@@ -169,20 +170,16 @@ impl Contract {
 
     pub fn set_foreign_chain_oracle_asset_id(&mut self, chain_id: U64, oracle_asset_id: String) {
         self.assert_owner();
-        if let Some(config) = self.foreign_chains.get_mut(&chain_id.0) {
-            config.oracle_asset_id = oracle_asset_id;
-        } else {
-            env::panic_str("Foreign chain does not exist");
-        }
+
+        let config = self.get_chain_mut(chain_id.0).unwrap_or_reject();
+        config.oracle_asset_id = oracle_asset_id;
     }
 
     pub fn set_foreign_chain_transfer_gas(&mut self, chain_id: U64, transfer_gas: U128) {
         self.assert_owner();
-        if let Some(config) = self.foreign_chains.get_mut(&chain_id.0) {
-            config.transfer_gas = U256::from(transfer_gas.0).0;
-        } else {
-            env::panic_str("Foreign chain does not exist");
-        }
+
+        let config = self.get_chain_mut(chain_id.0).unwrap_or_reject();
+        config.transfer_gas = U256::from(transfer_gas.0).0;
     }
 
     pub fn remove_foreign_chain(&mut self, chain_id: U64) {
@@ -216,10 +213,7 @@ impl Contract {
             "Paymaster key path must not be a valid account id",
         );
 
-        let chain = self
-            .foreign_chains
-            .get_mut(&chain_id.0)
-            .unwrap_or_else(|| env::panic_str("Foreign chain does not exist"));
+        let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
 
         let index = chain.paymasters.len();
 
@@ -236,30 +230,29 @@ impl Contract {
         #[cfg(not(feature = "debug"))]
         self.assert_owner();
 
-        let chain = self
-            .foreign_chains
-            .get_mut(&chain_id.0)
-            .unwrap_or_else(|| env::panic_str("Foreign chain does not exist"));
-
-        let paymaster = chain.paymasters.get_mut(index).unwrap_or_else(|| {
-            env::panic_str("Invalid index");
-        });
+        let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
+        let paymaster = chain.get_paymaster_mut(index).unwrap_or_reject();
 
         paymaster.minimum_available_balance = U256::from(balance.0).0;
+    }
+
+    pub fn increase_paymaster_balance(&mut self, chain_id: U64, index: u32, balance: U128) {
+        #[cfg(not(feature = "debug"))]
+        self.assert_owner();
+
+        let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
+        let paymaster = chain.get_paymaster_mut(index).unwrap_or_reject();
+
+        paymaster.minimum_available_balance =
+            (U256(paymaster.minimum_available_balance) + U256::from(balance.0)).0;
     }
 
     pub fn set_paymaster_nonce(&mut self, chain_id: U64, index: u32, nonce: u32) {
         #[cfg(not(feature = "debug"))]
         self.assert_owner();
 
-        let chain = self
-            .foreign_chains
-            .get_mut(&chain_id.0)
-            .unwrap_or_else(|| env::panic_str("Foreign chain does not exist"));
-
-        let paymaster = chain.paymasters.get_mut(index).unwrap_or_else(|| {
-            env::panic_str("Invalid index");
-        });
+        let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
+        let paymaster = chain.get_paymaster_mut(index).unwrap_or_reject();
 
         paymaster.nonce = nonce;
     }
@@ -269,10 +262,7 @@ impl Contract {
     /// payloads from getting signed.
     pub fn remove_paymaster(&mut self, chain_id: U64, index: u32) {
         self.assert_owner();
-        let chain = self
-            .foreign_chains
-            .get_mut(&chain_id.0)
-            .unwrap_or_else(|| env::panic_str("Foreign chain does not exist"));
+        let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
 
         if index < chain.paymasters.len() {
             chain.paymasters.swap_remove(index);
@@ -283,9 +273,8 @@ impl Contract {
     }
 
     pub fn get_paymasters(&self, chain_id: U64) -> Vec<ViewPaymasterConfiguration> {
-        self.foreign_chains
-            .get(&chain_id.0)
-            .unwrap_or_else(|| env::panic_str("Foreign chain does not exist"))
+        self.get_chain(chain_id.0)
+            .unwrap_or_reject()
             .paymasters
             .iter()
             .map(|p| ViewPaymasterConfiguration {
@@ -348,14 +337,14 @@ impl Contract {
         let fees = self
             .collected_fees
             .get_mut(&asset_id)
-            .unwrap_or_else(|| env::panic_str("No fee entry for provided asset ID"));
+            .expect_or_reject("No fee entry for provided asset ID");
 
         let amount = amount.unwrap_or(U128(fees.0));
 
         fees.0 = fees
             .0
             .checked_sub(amount.0)
-            .unwrap_or_else(|| env::panic_str("Not enough fees to withdraw"));
+            .expect_or_reject("Not enough fees to withdraw");
 
         asset_id.transfer(
             receiver_id.unwrap_or_else(|| self.own_get_owner().unwrap()),
@@ -379,17 +368,9 @@ impl Contract {
     pub fn estimate_gas_cost(&self, transaction_rlp_hex: String, price_data: PriceData) -> U128 {
         let transaction =
             ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
-                .unwrap_or_else(|e| env::panic_str(&format!("Invalid transaction request: {e}")));
+                .expect_or_reject("Invalid transaction request");
 
-        let foreign_chain_configuration = self
-            .foreign_chains
-            .get(&transaction.chain_id)
-            .unwrap_or_else(|| {
-                env::panic_str(&format!(
-                    "Paymaster not supported for chain id {}",
-                    transaction.chain_id
-                ))
-            });
+        let foreign_chain_configuration = self.get_chain(transaction.chain_id).unwrap_or_reject();
 
         let paymaster_transaction_gas = foreign_chain_configuration.transfer_gas();
         let request_tokens_for_gas =

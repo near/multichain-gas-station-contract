@@ -1,7 +1,9 @@
 use std::str::FromStr;
 
-use lib::kdf;
-use lib::signer::{MpcSignature, SignerInterface};
+use lib::{
+    kdf,
+    signer::{MpcSignature, SignerInterface},
+};
 use near_sdk::{
     env,
     json_types::{Base64VecU8, U64},

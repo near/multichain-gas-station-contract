@@ -58,7 +58,7 @@ impl MpcSignature {
 
 #[derive(Debug, Error)]
 pub enum MpcSignatureDecodeError {
-    #[error("Hex decoding error")]
+    #[error("Failed to decode signature from hex: {0}")]
     Hex(#[from] hex::FromHexError),
     #[error("Invalid signature data")]
     InvalidSignatureData,

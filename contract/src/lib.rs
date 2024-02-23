@@ -5,10 +5,13 @@ use ethers_core::{
         rlp::{Decodable, Rlp},
     },
 };
-use lib::foreign_address::ForeignAddress;
-use lib::kdf::get_mpc_address;
-use lib::oracle::{ext_oracle, PriceData};
-use lib::signer::{ext_signer, MpcSignature};
+use lib::{
+    foreign_address::ForeignAddress,
+    kdf::get_mpc_address,
+    oracle::{ext_oracle, PriceData},
+    signer::{ext_signer, MpcSignature},
+    Rejectable,
+};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env,
@@ -37,6 +40,7 @@ mod impl_debug;
 mod impl_management;
 
 pub mod valid_transaction_request;
+use thiserror::Error;
 use valid_transaction_request::ValidTransactionRequest;
 
 pub mod signature_request;
@@ -186,52 +190,6 @@ impl Contract {
         contract
     }
 
-    // Private helper methods
-
-    fn generate_unique_id(&mut self) -> u64 {
-        let id = self.next_unique_id;
-        self.next_unique_id = self.next_unique_id.checked_add(1).unwrap_or_else(|| {
-            env::panic_str("Failed to generate unique ID");
-        });
-        id
-    }
-
-    fn filter_transaction(&self, sender_id: &AccountId, transaction: &ValidTransactionRequest) {
-        // Check receiver whitelist
-        if self.flags.is_receiver_whitelist_enabled {
-            require!(
-                self.receiver_whitelist.contains(&transaction.to),
-                "Receiver is not whitelisted",
-            );
-        }
-
-        // Check sender whitelist
-        if self.flags.is_sender_whitelist_enabled {
-            require!(
-                self.sender_whitelist.contains(sender_id),
-                "Sender is not whitelisted",
-            );
-        }
-    }
-
-    fn insert_pending_transaction(
-        &mut self,
-        pending_transaction: PendingTransactionSequence,
-    ) -> TransactionCreation {
-        #[allow(clippy::cast_possible_truncation)]
-        let pending_signature_count = pending_transaction.signature_requests.len() as u32;
-
-        let id = self.generate_unique_id();
-
-        self.pending_transaction_sequences
-            .insert(id, pending_transaction);
-
-        TransactionCreation {
-            id: id.into(),
-            pending_signature_count,
-        }
-    }
-
     // Public methods
 
     #[payable]
@@ -245,7 +203,7 @@ impl Contract {
 
         let transaction =
             ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
-                .unwrap_or_else(|e| env::panic_str(&format!("Invalid transaction request: {e}")));
+                .unwrap_or_reject();
 
         // Guarantees invariants required in callback
         self.filter_transaction(&env::predecessor_account_id(), &transaction);
@@ -254,12 +212,7 @@ impl Contract {
 
         if use_paymaster {
             let chain_id = transaction.chain_id();
-            let foreign_chain_configuration = self
-                .foreign_chains
-                .get(&chain_id.as_u64())
-                .unwrap_or_else(|| {
-                    env::panic_str(&format!("Paymaster not supported for chain id {chain_id}"))
-                });
+            let foreign_chain_configuration = self.get_chain(chain_id.as_u64()).unwrap_or_reject();
 
             ext_oracle::ext(self.oracle_id.clone())
                 .get_price_data(Some(vec![
@@ -308,14 +261,11 @@ impl Contract {
         let foreign_chain_configuration = self
             .foreign_chains
             .get_mut(&transaction_request.chain_id)
-            .unwrap_or_else(|| {
-                env::panic_str(&format!(
-                    "Paymaster not supported for chain id {}",
-                    transaction_request.chain_id
-                ))
+            .expect_or_reject(ChainConfigurationDoesNotExistError {
+                chain_id: transaction_request.chain_id,
             });
 
-        let price_data = result.unwrap_or_else(|_| env::panic_str("Failed to fetch price data"));
+        let price_data = result.ok().expect_or_reject("Failed to fetch price data");
 
         let paymaster_transaction_gas = foreign_chain_configuration.transfer_gas();
         let request_tokens_for_gas = (transaction_request.gas() + paymaster_transaction_gas)
@@ -343,16 +293,14 @@ impl Contract {
 
         let paymaster = foreign_chain_configuration
             .next_paymaster()
-            .unwrap_or_else(|| env::panic_str("No paymasters found"));
+            .expect_or_reject("No paymasters found");
 
         let sender_foreign_address = get_mpc_address(
-            self.signer_contract_public_key.clone().unwrap_or_else(|| {
-                env::panic_str("The signer contract public key must be refreshed by calling `refresh_signer_public_key`")
-            }),
+            self.signer_contract_public_key.clone().expect_or_reject("The signer contract public key must be refreshed by calling `refresh_signer_public_key`"),
             &env::current_account_id(),
             sender.as_str(),
         )
-        .unwrap_or_else(|e| env::panic_str(&format!("Failed to calculate MPC address: {e}")));
+        .expect_or_reject("Failed to calculate MPC address");
 
         let chain_id = transaction_request.chain_id;
 
@@ -368,13 +316,10 @@ impl Contract {
             max_fee_per_gas: transaction_request.max_fee_per_gas,
         };
 
-        if let Some(balance) =
-            U256(paymaster.minimum_available_balance).checked_sub(request_tokens_for_gas)
-        {
-            paymaster.minimum_available_balance = balance.0;
-        } else {
-            env::panic_str("Paymaster does not have enough funds");
-        }
+        paymaster.minimum_available_balance = U256(paymaster.minimum_available_balance)
+            .checked_sub(request_tokens_for_gas)
+            .expect_or_reject("Paymaster does not have enough funds")
+            .0;
 
         let signature_requests = vec![
             SignatureRequest::new(&paymaster.key_path, paymaster_transaction, true),
@@ -403,8 +348,8 @@ impl Contract {
         let transaction = self
             .pending_transaction_sequences
             .get_mut(&id)
-            .unwrap_or_else(|| {
-                env::panic_str(&format!("Transaction signature request {id} not found"))
+            .expect_or_reject(TransactionSequenceDoesNotExistError {
+                transaction_sequence_id: id,
             });
 
         // ensure not expired
@@ -425,7 +370,7 @@ impl Contract {
             .iter_mut()
             .enumerate()
             .find(|(_, r)| r.is_pending())
-            .unwrap_or_else(|| env::panic_str("No pending or non-in-flight signature requests"));
+            .expect_or_reject("No pending or non-in-flight signature requests");
 
         next_signature_request.status = Status::InFlight;
 
@@ -454,17 +399,16 @@ impl Contract {
         let pending_transaction_sequence = self
             .pending_transaction_sequences
             .get_mut(&id)
-            .unwrap_or_else(|| {
-                env::panic_str(&format!("Pending transaction sequence {id} not found"))
+            .expect_or_reject(TransactionSequenceDoesNotExistError {
+                transaction_sequence_id: id,
             });
 
         let request = pending_transaction_sequence
             .signature_requests
             .get_mut(index as usize)
-            .unwrap_or_else(|| {
-                env::panic_str(&format!(
-                    "Signature request {id}.{index} not found in transaction sequence",
-                ))
+            .expect_or_reject(SignatureRequestDoesNoteExistError {
+                transaction_sequence_id: id,
+                index,
             });
 
         if !request.is_in_flight() {
@@ -476,9 +420,10 @@ impl Contract {
         // TODO: What to do if signing fails?
         // TODO: Refund the amount to the paymaster account?
         let signature = result
-            .unwrap_or_else(|e| env::panic_str(&format!("Failed to produce signature: {e:?}")))
+            .ok()
+            .expect_or_reject("Failed to produce signature")
             .try_into()
-            .unwrap_or_else(|e| env::panic_str(&format!("Failed to decode signature: {e:?}")));
+            .unwrap_or_reject();
 
         let transaction: TypedTransaction = request.transaction.clone().into();
 
@@ -542,7 +487,9 @@ impl Contract {
         let transaction = self
             .pending_transaction_sequences
             .get(&id.0)
-            .unwrap_or_else(|| env::panic_str("Transaction not found"));
+            .expect_or_reject(TransactionSequenceDoesNotExistError {
+                transaction_sequence_id: id.0,
+            });
 
         require!(
             transaction.created_by_account_id == env::predecessor_account_id(),
@@ -573,11 +520,94 @@ impl Contract {
     }
 }
 
+#[derive(Debug, Error)]
+#[error("Configuration for chain ID {chain_id} does not exist")]
+pub struct ChainConfigurationDoesNotExistError {
+    pub chain_id: u64,
+}
+
+#[derive(Debug, Error)]
+#[error("Transaction sequence with ID {transaction_sequence_id} does not exist")]
+pub struct TransactionSequenceDoesNotExistError {
+    pub transaction_sequence_id: u64,
+}
+
+#[derive(Debug, Error)]
+#[error("Signature request {transaction_sequence_id}.{index} does not exist")]
+pub struct SignatureRequestDoesNoteExistError {
+    pub transaction_sequence_id: u64,
+    pub index: u32,
+}
+
+impl Contract {
+    fn get_chain(
+        &self,
+        chain_id: u64,
+    ) -> Result<&ChainConfiguration, ChainConfigurationDoesNotExistError> {
+        self.foreign_chains
+            .get(&chain_id)
+            .ok_or(ChainConfigurationDoesNotExistError { chain_id })
+    }
+
+    fn get_chain_mut(
+        &mut self,
+        chain_id: u64,
+    ) -> Result<&mut ChainConfiguration, ChainConfigurationDoesNotExistError> {
+        self.foreign_chains
+            .get_mut(&chain_id)
+            .ok_or(ChainConfigurationDoesNotExistError { chain_id })
+    }
+
+    fn generate_unique_id(&mut self) -> u64 {
+        let id = self.next_unique_id;
+        self.next_unique_id = self
+            .next_unique_id
+            .checked_add(1)
+            .expect_or_reject("Failed to generate unique ID");
+        id
+    }
+
+    fn filter_transaction(&self, sender_id: &AccountId, transaction: &ValidTransactionRequest) {
+        // Check receiver whitelist
+        if self.flags.is_receiver_whitelist_enabled {
+            require!(
+                self.receiver_whitelist.contains(&transaction.to),
+                "Receiver is not whitelisted",
+            );
+        }
+
+        // Check sender whitelist
+        if self.flags.is_sender_whitelist_enabled {
+            require!(
+                self.sender_whitelist.contains(sender_id),
+                "Sender is not whitelisted",
+            );
+        }
+    }
+
+    fn insert_pending_transaction(
+        &mut self,
+        pending_transaction: PendingTransactionSequence,
+    ) -> TransactionCreation {
+        #[allow(clippy::cast_possible_truncation)]
+        let pending_signature_count = pending_transaction.signature_requests.len() as u32;
+
+        let id = self.generate_unique_id();
+
+        self.pending_transaction_sequences
+            .insert(id, pending_transaction);
+
+        TransactionCreation {
+            id: id.into(),
+            pending_signature_count,
+        }
+    }
+}
+
 fn decode_transaction_request(rlp_hex: &str) -> Eip1559TransactionRequest {
-    let rlp_bytes = hex::decode(rlp_hex)
-        .unwrap_or_else(|_| env::panic_str("Error decoding `transaction_rlp` as hex"));
+    let rlp_bytes =
+        hex::decode(rlp_hex).expect_or_reject("Error decoding `transaction_rlp` as hex");
     let rlp = Rlp::new(&rlp_bytes);
-    Eip1559TransactionRequest::decode(&rlp).unwrap_or_else(|_| {
-        env::panic_str("Error decoding `transaction_rlp` as transaction request RLP")
-    })
+    Eip1559TransactionRequest::decode(&rlp)
+        .expect_or_reject("Error decoding `transaction_rlp` as transaction request RLP")
 }

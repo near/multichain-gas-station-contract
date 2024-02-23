@@ -10,6 +10,7 @@ use near_sdk::{
     store::Vector,
 };
 use schemars::JsonSchema;
+use thiserror::Error;
 
 #[derive(
     Serialize,
@@ -55,9 +56,22 @@ pub struct ChainConfiguration {
     pub oracle_asset_id: String,
 }
 
+#[derive(Debug, Error)]
+#[error("Paymaster with index {0} does not exist")]
+pub struct PaymasterDoesNotExistError(u32);
+
 impl ChainConfiguration {
     pub fn transfer_gas(&self) -> U256 {
         U256(self.transfer_gas)
+    }
+
+    pub fn get_paymaster_mut(
+        &mut self,
+        index: u32,
+    ) -> Result<&mut PaymasterConfiguration, PaymasterDoesNotExistError> {
+        self.paymasters
+            .get_mut(index)
+            .ok_or(PaymasterDoesNotExistError(index))
     }
 
     pub fn next_paymaster(&mut self) -> Option<&mut PaymasterConfiguration> {
