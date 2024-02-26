@@ -25,6 +25,27 @@ Three transactions are required because of the gas restrictions imposed by the p
 
 Once this service and its supporting services are live, the multichain relayer server will be monitoring this gas station contract and relaying the signed transactions in the proper order as they become available, so it will not be strictly necessary for the users of this contract to ensure that the transactions are properly relayed, unless the user wishes to relay the transactions using their own RPC (e.g. to minimize latency).
 
+### `sign_next` call trace explanation
+
+Let's say `alice.near` has already called `create_transaction(..., use_paymaster=true)` on the gas station contract `gas-station.near`, and has obtained a transaction sequence `id` as a result of that function call.
+
+Next, `alice.near` calls `gas-station.near::sign_next(id)`. Because this is the first `sign_next` call, the contract first generates a paymaster gas funding transaction. However, this is payload is unsigned at first. It is unwise[^unwise] to keep private keys on-chain (they would cease to be private), so the contract invokes another service, the MPC signing service.
+
+[^unwise]: The debug/mock version of this contract _does_ store private keys on-chain (**big no-no**), making it _only suitable for testing_.
+
+This service allows us to request signatures from a particular private key that the gas station contract controls. The MPC service allows the gas station contract to request a key by "path," which is simply a string. The signing service then uses a combination of the predecessor account ID (in this case, `gas-station.near`), the path string provided as a parameter to the signature request, and a few other pieces of information to derive a recoverable signature for the payload that recovers to a stable public key.
+
+In the case of the paymaster transaction, the gas station uses a special set of predetermined path strings that map to known addresses on the foreign chain. These addresses are pre-funded with the native (gas) token for that foreign chain. Thus, when the gas station contract requests signatures for the paymaster transaction payload, the signed transactions are able to manipulate the funds in that foreign account.
+
+In the case of the second, user-provided transaction, the gas station passes the user's account ID as the path string to the MPC signer service. This means that each transaction requested by `alice.near` will receive a signature that recovers to the same public key (foreign address) every time.
+
+Therefore, the call trace for the two `sign_next` transactions looks something like this:
+
+1. `alice.near` &rarr; `gas-station.near::sign_next(id) -> SignedTransaction`
+   - `gas-station.near` &rarr; `mpc-signer.near::sign(payload=..., path=$0) -> Signature`
+2. `alice.near` &rarr; `gas-station.near::sign_next(id) -> SignedTransaction`
+   - `gas-station.near` &rarr; `mpc-signer.near::sign(payload=..., path=alice.near) -> Signature`
+
 ## Requirements
 
 - Rust & Cargo
@@ -38,6 +59,12 @@ cargo make build
 ```
 
 The WASM binary will be generated in `target/wasm32-unknown-unknown/release/`.
+
+The debug build can be generated with the command:
+
+```bash
+cargo make build-debug
+```
 
 ## Contract Interactions
 
