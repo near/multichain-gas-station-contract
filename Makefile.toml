@@ -2,20 +2,20 @@
 workspace = false
 clear = true
 script = """
-cargo build --package contract --target wasm32-unknown-unknown --release --no-default-features
+cargo build --package gas-station --target wasm32-unknown-unknown --release --no-default-features
 """
 
 [tasks.build-debug]
 workspace = false
 script = """
-cargo build --package contract --target wasm32-unknown-unknown --release --features=debug
+cargo build --package gas-station --target wasm32-unknown-unknown --release --features=debug
 """
 
 [tasks.test]
 workspace = false
 clear = true
 script = """
-mkdir -p target/near/{contract,oracle,signer}
+mkdir -p target/near/{gas_station,oracle,signer}
 cargo test
 """
 
@@ -23,7 +23,7 @@ cargo test
 workspace = false
 clear = true
 script = """
-mkdir -p target/near/{contract,oracle,signer}
+mkdir -p target/near/{gas_station,oracle,signer}
 cargo nextest run
 """
 

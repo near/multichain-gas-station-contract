@@ -1,6 +1,6 @@
 [package]
 authors = ["Jacob Lindahl <jacob.lindahl@near.org>"]
-name = "contract"
+name = "gas-station"
 version = "0.1.0"
 edition = "2021"
 

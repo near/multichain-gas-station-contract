@@ -1,0 +1,14 @@
+[package]
+authors = ["Jacob Lindahl <jacob.lindahl@near.org>"]
+name = "key-manager"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lib = { path = "../lib" }
+near-sdk.workspace = true
+
+[features]
+
+[lib]
+crate-type = ["cdylib", "rlib"]

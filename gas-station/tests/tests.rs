@@ -1,12 +1,12 @@
 // NOTE: If tests fail due to a directory not existing error, create `target/near/{contract,oracle,signer}`
 
-use contract::{
-    chain_configuration::ViewPaymasterConfiguration, contract_event::TransactionSequenceSigned,
-    TransactionCreation,
-};
 use ethers_core::{
     types::transaction::eip2718::TypedTransaction,
     utils::{hex, rlp::Rlp},
+};
+use gas_station::{
+    chain_configuration::ViewPaymasterConfiguration, contract_event::TransactionSequenceSigned,
+    TransactionCreation,
 };
 use lib::foreign_address::ForeignAddress;
 use near_sdk::serde_json::json;

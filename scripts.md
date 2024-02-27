@@ -5,7 +5,7 @@
 1. Deploy
 
    ```sh
-   near contract deploy canhazgas.testnet use-file ./target/wasm32-unknown-unknown/release/contract.wasm with-init-call new_debug json-args '{"signer_contract_id":"signer.canhazgas.testnet","oracle_id":"priceoracle.testnet","oracle_local_asset_id":"wrap.testnet"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
+   near contract deploy canhazgas.testnet use-file ./target/wasm32-unknown-unknown/release/gas_station.wasm with-init-call new_debug json-args '{"signer_contract_id":"signer.canhazgas.testnet","oracle_id":"priceoracle.testnet","oracle_local_asset_id":"wrap.testnet"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
    ```
 
 2. Refresh signer key
