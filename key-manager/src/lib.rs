@@ -5,7 +5,7 @@ use lib::{
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, near_bindgen, require,
-    store::{lookup_map::Entry, LookupMap},
+    store::LookupMap,
     AccountId, BorshStorageKey, PanicOnDefault, PromiseError, PromiseOrValue,
 };
 
@@ -53,23 +53,28 @@ impl ChainKeyManager for ManagerContract {
 
     fn ck_transfer_governorship(
         &mut self,
+        owner_id: Option<AccountId>,
         path: String,
         new_governor_id: Option<AccountId>,
     ) -> PromiseOrValue<()> {
-        let owner_id = env::predecessor_account_id();
+        let owner_id = owner_id.unwrap_or_else(env::predecessor_account_id);
 
-        match self.key_governor.entry(KeyIdentifier {
+        let identifier = KeyIdentifier {
             owner_id: owner_id.clone(),
             path: path.clone(),
-        }) {
-            // external governor is already assigned, so check in with that governor before allowing the transfer
-            Entry::Occupied(e) => PromiseOrValue::Promise(
-                ext_chain_key_governor::ext(e.get().clone())
-                    .ck_on_transfer_governorship(
-                        owner_id.clone(),
-                        path.clone(),
-                        new_governor_id.clone(),
-                    )
+        };
+
+        if let Some(current_governor) = self.key_governor.get(&identifier) {
+            require!(
+                current_governor == &env::predecessor_account_id(),
+                "Only the currently assigned governor can transfer the governorship",
+            );
+        }
+
+        if let Some(new_governor_id) = new_governor_id {
+            PromiseOrValue::Promise(
+                ext_chain_key_governor::ext(new_governor_id.clone())
+                    .ck_accept_governorship(owner_id.clone(), path.clone())
                     .then(
                         Self::ext(env::current_account_id()).ck_resolve_transfer_governorship(
                             owner_id,
@@ -77,14 +82,10 @@ impl ChainKeyManager for ManagerContract {
                             new_governor_id,
                         ),
                     ),
-            ),
-            // no external governor is assigned
-            Entry::Vacant(e) => {
-                if let Some(new_governor_id) = new_governor_id {
-                    e.insert(new_governor_id);
-                }
-                PromiseOrValue::Value(())
-            }
+            )
+        } else {
+            self.key_governor.remove(&identifier);
+            PromiseOrValue::Value(())
         }
     }
 
@@ -123,17 +124,15 @@ impl ManagerContract {
         &mut self,
         #[serializer(borsh)] owner_id: AccountId,
         #[serializer(borsh)] path: String,
-        #[serializer(borsh)] new_governor_id: Option<AccountId>,
+        #[serializer(borsh)] new_governor_id: AccountId,
         #[callback_result] result: Result<bool, PromiseError>,
     ) {
-        require!(matches!(result, Ok(true)), "Governorship transfer failed");
+        require!(
+            matches!(result, Ok(true)),
+            "New governor did not accept governorship",
+        );
 
-        let identifier = KeyIdentifier { owner_id, path };
-
-        if let Some(new_governor_id) = new_governor_id {
-            self.key_governor.insert(identifier, new_governor_id);
-        } else {
-            self.key_governor.remove(&identifier);
-        }
+        self.key_governor
+            .insert(KeyIdentifier { owner_id, path }, new_governor_id);
     }
 }

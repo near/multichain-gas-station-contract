@@ -8,6 +8,7 @@ pub trait ChainKeyManager {
     fn ck_get_governor_for_key(&self, owner_id: AccountId, path: String) -> Option<AccountId>;
     fn ck_transfer_governorship(
         &mut self,
+        owner_id: Option<AccountId>,
         path: String,
         new_governor_id: Option<AccountId>,
     ) -> PromiseOrValue<()>;
@@ -21,10 +22,5 @@ pub trait ChainKeyManager {
 
 #[ext_contract(ext_chain_key_governor)]
 pub trait ChainKeyGovernor {
-    fn ck_on_transfer_governorship(
-        &mut self,
-        owner_id: AccountId,
-        path: String,
-        new_governor_id: Option<AccountId>,
-    ) -> bool;
+    fn ck_accept_governorship(&mut self, owner_id: AccountId, path: String) -> bool;
 }
