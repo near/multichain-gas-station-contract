@@ -1,21 +1,22 @@
-use near_sdk::{ext_contract, AccountId};
+use near_sdk::{ext_contract, AccountId, PromiseOrValue};
 
-pub type ChainKeyId = String;
 pub type ChainKeySignature = String;
-pub type ChainKeyPublicKey = String;
 
 #[ext_contract(ext_chain_key_manager)]
 pub trait ChainKeyManager {
+    fn ck_scheme_oid(&self) -> String;
     fn ck_get_governor_for_key(&self, owner_id: AccountId, path: String) -> Option<AccountId>;
-    fn ck_transfer_governorship(&mut self, path: String, governor_id: Option<AccountId>);
-    #[private]
-    fn ck_resolve_transfer_governorship(&mut self);
-    fn ck_sign(
+    fn ck_transfer_governorship(
+        &mut self,
+        path: String,
+        new_governor_id: Option<AccountId>,
+    ) -> PromiseOrValue<()>;
+    fn ck_sign_prehashed(
         &mut self,
         owner_id: Option<AccountId>,
         path: String,
         payload: Vec<u8>,
-    ) -> ChainKeySignature;
+    ) -> PromiseOrValue<ChainKeySignature>;
 }
 
 #[ext_contract(ext_chain_key_governor)]
@@ -24,7 +25,6 @@ pub trait ChainKeyGovernor {
         &mut self,
         owner_id: AccountId,
         path: String,
-        public_key: ChainKeyPublicKey,
         new_governor_id: Option<AccountId>,
     ) -> bool;
 }
