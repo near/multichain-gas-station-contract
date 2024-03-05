@@ -1,40 +1,47 @@
 use lib::{
-    chain_key::{ext_chain_key_governor, ChainKeyManager, ChainKeySignature},
+    chain_key::{ext_chain_key_approved, ChainKeyManager, ChainKeySignature},
     signer::ext_signer,
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, near_bindgen, require,
-    store::LookupMap,
-    AccountId, BorshStorageKey, PanicOnDefault, PromiseError, PromiseOrValue,
+    store::{LookupMap, UnorderedSet},
+    AccountId, BorshStorageKey, PanicOnDefault, PromiseOrValue,
 };
 
 #[derive(Debug, Clone, BorshSerialize, BorshStorageKey)]
 enum StorageKey {
-    KeyGovernor,
+    Permissions,
+    PermissionFor(KeyId),
 }
 
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct KeyIdentifier {
-    owner_id: AccountId,
-    path: String,
-}
+#[derive(Debug, Clone, BorshSerialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct KeyId(AccountId, String);
 
 #[derive(Debug, BorshSerialize, BorshDeserialize, PanicOnDefault)]
 #[near_bindgen]
 pub struct ManagerContract {
-    pub signer_id: AccountId,
-    pub key_governor: LookupMap<KeyIdentifier, AccountId>,
+    pub signer_contract_id: AccountId,
+    pub permissions: LookupMap<KeyId, UnorderedSet<AccountId>>,
 }
 
 #[near_bindgen]
 impl ManagerContract {
     #[init]
-    pub fn new(signer_id: AccountId) -> Self {
+    pub fn new(signer_contract_id: AccountId) -> Self {
         Self {
-            signer_id,
-            key_governor: LookupMap::new(StorageKey::KeyGovernor),
+            signer_contract_id,
+            permissions: LookupMap::new(StorageKey::Permissions),
         }
+    }
+
+    /// Only returns `true` if the account has been assigned permission. Will
+    /// return `false` for the owner (unless the owner is also assigned as a
+    /// signer).
+    fn is_approved(&self, key_id: &KeyId, account_id: &AccountId) -> bool {
+        self.permissions
+            .get(key_id)
+            .map_or(false, |signers| signers.contains(account_id))
     }
 }
 
@@ -45,51 +52,100 @@ impl ChainKeyManager for ManagerContract {
         "1.3.132.0.10".to_string()
     }
 
-    fn ck_get_governor_for_key(&self, owner_id: AccountId, path: String) -> Option<AccountId> {
-        self.key_governor
-            .get(&KeyIdentifier { owner_id, path })
-            .cloned()
+    fn ck_approve(
+        &mut self,
+        path: String,
+        account_id: AccountId,
+        msg: Option<String>,
+    ) -> PromiseOrValue<()> {
+        // As opposed to the NFT approval functions (NEP-178 - https://nomicon.io/Standards/Tokens/NonFungibleToken/ApprovalManagement#what-is-an-approval-id),
+        // this standard does _not_ require approval IDs. This is because this
+        // standard does not support transfers, so there is no risk of
+        // "re-using" approvals from a previous owner.
+        let owner_id = env::predecessor_account_id();
+
+        let permissions = self
+            .permissions
+            .entry(KeyId(owner_id.clone(), path.clone()))
+            .or_insert_with(|| {
+                UnorderedSet::new(StorageKey::PermissionFor(KeyId(
+                    owner_id.clone(),
+                    path.clone(),
+                )))
+            });
+
+        // Because this standard supports non-notifying approvals and
+        // revocations, this is a somewhat thin protection, really only
+        // avoiding double-notifying when a duplicate call is accidental.
+        let did_not_previously_have_permission = permissions.insert(account_id.clone());
+
+        if did_not_previously_have_permission {
+            if let Some(msg) = msg {
+                return PromiseOrValue::Promise(
+                    ext_chain_key_approved::ext(account_id).ck_on_approved(
+                        owner_id.clone(),
+                        path.clone(),
+                        msg,
+                    ),
+                );
+            }
+        }
+
+        PromiseOrValue::Value(())
     }
 
-    fn ck_transfer_governorship(
+    fn ck_revoke(
         &mut self,
-        owner_id: Option<AccountId>,
         path: String,
-        new_governor_id: Option<AccountId>,
+        account_id: AccountId,
+        msg: Option<String>,
     ) -> PromiseOrValue<()> {
-        let owner_id = owner_id.unwrap_or_else(env::predecessor_account_id);
+        let owner_id = env::predecessor_account_id();
 
-        let identifier = KeyIdentifier {
-            owner_id: owner_id.clone(),
-            path: path.clone(),
+        let permissions = if let Some(permissions) = self
+            .permissions
+            .get_mut(&KeyId(owner_id.clone(), path.clone()))
+        {
+            permissions
+        } else {
+            return PromiseOrValue::Value(());
         };
 
-        if let Some(current_governor) = self.key_governor.get(&identifier) {
-            require!(
-                current_governor == &env::predecessor_account_id(),
-                "Only the currently assigned governor can transfer the governorship",
-            );
+        let account_had_signing_permission = permissions.remove(&account_id);
+
+        if account_had_signing_permission {
+            if let Some(msg) = msg {
+                return PromiseOrValue::Promise(
+                    ext_chain_key_approved::ext(account_id.clone()).ck_on_revoked(
+                        owner_id.clone(),
+                        path.clone(),
+                        msg,
+                    ),
+                );
+            }
         }
 
-        if let Some(new_governor_id) = new_governor_id {
-            PromiseOrValue::Promise(
-                ext_chain_key_governor::ext(new_governor_id.clone())
-                    .ck_accept_governorship(owner_id.clone(), path.clone())
-                    .then(
-                        Self::ext(env::current_account_id()).ck_resolve_transfer_governorship(
-                            owner_id,
-                            path,
-                            new_governor_id,
-                        ),
-                    ),
-            )
+        PromiseOrValue::Value(())
+    }
+
+    fn ck_revoke_all(&mut self, path: String) -> u32 {
+        let owner_id = env::predecessor_account_id();
+        let key_id = KeyId(owner_id, path);
+        if let Some(permissions) = self.permissions.get_mut(&key_id) {
+            let len = permissions.len();
+            permissions.clear();
+            self.permissions.remove(&key_id);
+            len
         } else {
-            self.key_governor.remove(&identifier);
-            PromiseOrValue::Value(())
+            0
         }
     }
 
-    fn ck_sign_prehashed(
+    fn ck_is_approved(&self, owner_id: AccountId, path: String, account_id: AccountId) -> bool {
+        self.is_approved(&KeyId(owner_id, path), &account_id)
+    }
+
+    fn ck_sign_hash(
         &mut self,
         owner_id: Option<AccountId>,
         path: String,
@@ -99,40 +155,19 @@ impl ChainKeyManager for ManagerContract {
             .try_into()
             .unwrap_or_else(|_| env::panic_str("Invalid payload length"));
 
-        let owner_id = owner_id.unwrap_or_else(env::predecessor_account_id);
-        let governor = self
-            .key_governor
-            .get(&KeyIdentifier {
-                owner_id: owner_id.clone(),
-                path: path.clone(),
-            })
-            .unwrap_or(&owner_id);
+        let predecessor = env::predecessor_account_id();
+        let owner_id = owner_id.unwrap_or_else(|| predecessor.clone());
 
-        require!(governor == &env::predecessor_account_id(), "Unauthorized");
+        let key_id = KeyId(owner_id.clone(), path.clone());
 
-        PromiseOrValue::Promise(
-            ext_signer::ext(self.signer_id.clone())
-                .sign(payload, &format!("{}/{}", owner_id, path)),
-        )
-    }
-}
-
-#[near_bindgen]
-impl ManagerContract {
-    #[private]
-    pub fn ck_resolve_transfer_governorship(
-        &mut self,
-        #[serializer(borsh)] owner_id: AccountId,
-        #[serializer(borsh)] path: String,
-        #[serializer(borsh)] new_governor_id: AccountId,
-        #[callback_result] result: Result<bool, PromiseError>,
-    ) {
         require!(
-            matches!(result, Ok(true)),
-            "New governor did not accept governorship",
+            owner_id == env::predecessor_account_id() || self.is_approved(&key_id, &predecessor),
+            "Unauthorized",
         );
 
-        self.key_governor
-            .insert(KeyIdentifier { owner_id, path }, new_governor_id);
+        PromiseOrValue::Promise(
+            ext_signer::ext(self.signer_contract_id.clone())
+                .sign(payload, &format!("{}/{}", owner_id, path)),
+        )
     }
 }
