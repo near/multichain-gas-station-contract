@@ -3846,6 +3846,7 @@ dependencies = [
 name = "signer"
 version = "0.1.0"
 dependencies = [
+ "ethers-core",
  "lib",
  "near-sdk",
 ]
