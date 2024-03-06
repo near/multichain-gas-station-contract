@@ -17,7 +17,7 @@ near-workspaces = { version = "0.10", features = ["unstable"] }
 tokio = "1.28"
 
 [features]
-default = ["debug"]
+default = []
 
 # enables functions only for testing purposes
 # NOT SAFE FOR PRODUCTION USE

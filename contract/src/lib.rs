@@ -374,16 +374,19 @@ impl Contract {
 
         next_signature_request.status = Status::InFlight;
 
+        let payload = {
+            let mut sighash = <TypedTransaction as From<ValidTransactionRequest>>::from(
+                next_signature_request.transaction.clone(),
+            )
+            .sighash()
+            .to_fixed_bytes();
+            sighash.reverse();
+            sighash
+        };
+
         #[allow(clippy::cast_possible_truncation)]
         ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
-            .sign(
-                <TypedTransaction as From<ValidTransactionRequest>>::from(
-                    next_signature_request.transaction.clone(),
-                )
-                .sighash()
-                .0,
-                &next_signature_request.key_path,
-            )
+            .sign(payload, &next_signature_request.key_path)
             .then(Self::ext(env::current_account_id()).sign_next_callback(id.into(), index as u32))
     }
 

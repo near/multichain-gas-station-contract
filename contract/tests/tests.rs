@@ -6,9 +6,13 @@ use contract::{
 };
 use ethers_core::{
     types::transaction::eip2718::TypedTransaction,
-    utils::{hex, rlp::Rlp},
+    utils::{self, hex, rlp::Rlp},
 };
-use lib::foreign_address::ForeignAddress;
+use lib::{
+    foreign_address::ForeignAddress,
+    kdf::{derive_evm_address_for_account, get_mpc_address},
+    signer::MpcSignature,
+};
 use near_sdk::serde_json::json;
 use near_workspaces::{
     operations::Function,
@@ -214,10 +218,14 @@ fn generate_eth_rlp_hex() {
         max_fee_per_gas: Some(1234.into()),
         max_priority_fee_per_gas: Some(1234.into()),
         value: Some(1234.into()),
-        nonce: Some(7777.into()),
+        nonce: Some(8891.into()),
     };
 
-    println!("{}", hex::encode_prefixed(eth_transaction.rlp()));
+    println!("RLP: {}", hex::encode_prefixed(eth_transaction.rlp()));
+    let tx: TypedTransaction = eth_transaction.into();
+    let mut sighash = tx.sighash().to_fixed_bytes();
+    sighash.reverse();
+    println!("Sighash: {:?}", sighash);
 }
 
 #[test]
@@ -238,4 +246,70 @@ fn decode_rlp() {
     let txrq = TypedTransaction::decode_signed(&rlp).unwrap();
 
     println!("{txrq:?}");
+}
+
+#[test]
+#[ignore]
+fn test_derive_address() {
+    let mpc_public_key = "secp256k1:4HFcTSodRLVCGNVcGc4Mf2fwBBBxv9jxkGdiW2S2CA1y6UpVVRWKj6RX7d7TDt65k2Bj3w9FU4BGtt43ZvuhCnNt".parse().unwrap();
+    let a = get_mpc_address(mpc_public_key, &"hatchet.testnet".parse().unwrap(), "test").unwrap();
+    println!("{a:?}");
+    println!("{a}");
+}
+
+#[test]
+#[ignore]
+fn test_derive_new_mpc() {
+    // derive key sha256 unreversed: 0x4f891037e68729357029A84b913a4a5Fa3E0F5bf
+    // derive key sha256 reversed: 0x20c505Fe0E4Aa8dA8aF6437a99cF4B7DA0AfDE46
+
+    // first signature from: 0x49ea71547Df3220814C2ca78583cCf0B661f6C5e
+
+    // reversed first signature from: 0xb4C9b8A11A9a8D62b520F44CB34c9cC5Dcb112ad, then 0x4f891037e68729357029A84b913a4a5Fa3E0F5bf
+    // reversed second signature from: 0x40D390cFFbA6D5255F855D4Ea14cfc1624dBFFeF, then 0x3a8bE0e31d9ACc969dF9cb2ecE935F331443B800
+    let eth_transaction = ethers_core::types::transaction::eip1559::Eip1559TransactionRequest {
+        chain_id: Some(0.into()),
+        from: None,
+        to: Some(ForeignAddress([0x0f; 20]).into()),
+        data: None,
+        gas: Some(21000.into()),
+        access_list: vec![].into(),
+        max_fee_per_gas: Some(1234.into()),
+        max_priority_fee_per_gas: Some(1234.into()),
+        value: Some(1234.into()),
+        nonce: Some(8891.into()),
+    };
+    let tx: TypedTransaction = eth_transaction.into();
+    let mut sighash = tx.sighash().to_fixed_bytes();
+    // sighash.reverse();
+
+    let mpc_signature = MpcSignature(
+        // "029D401E23AA91038792D3C172E90D95728C8236917712BB33D5B36139554A9D88".to_string(),
+        // "642D9CCABB7381AA80D7ADDE7AC01D51994E0315F02987EC1254C4CD15DAC5D3".to_string(),
+        // "027509A493DF8B3643D85B6B4254AA27528B347D9E8B14AF56E66F420E494AFFC7".to_string(),
+        // "4D2760E8B8D1898E2DB16DAB396832D7F52CC85751EDDC11F4C7625840A099FB".to_string(),
+        //   "0333FF1E4FFA121E098D2EEF9A00EA28BF3D63E9D65628EE0B30F38A9F6DC89D11".to_string(),
+        //   "01C4AC7FF297129B5A810B94BB638235D7EB733E0409EB2CC787BEE969CDF60C".to_string()
+        // "023B077DBA817261A149BF1E28D4AA514A3426C717AE5E2419219E7F8F529AD2AC".to_string(),
+        // "2523A131D418DEDC82EDB7E28E5D451C26DA34AFCD5EBCBF6DFB422A02B8F01D".to_string(),
+        "03DAE1E75B650ABC6AD22C899FC4245A9F58E323320B7380872C1813A7DCEB0F95".to_string(),
+        "3FD2BC8430EC146E6D1B0EC64FE80EEDC0C483B95C8247FDFC5ADFC459BB3096".to_string(),
+    );
+
+    let sig: ethers_core::types::Signature = mpc_signature.try_into().unwrap();
+    let recovered_address = sig.recover(sighash).unwrap();
+
+    let signed_rlp_bytes = tx.rlp_signed(&sig);
+    let signed_rlp = Rlp::new(&signed_rlp_bytes);
+    let (recovered_signed_transaction, _decoded_sig) =
+        TypedTransaction::decode_signed(&signed_rlp).unwrap();
+    println!("{}", utils::to_checksum(&recovered_address, None));
+    println!(
+        "{}",
+        utils::to_checksum(recovered_signed_transaction.from().unwrap(), None)
+    );
+    assert_eq!(
+        &recovered_address,
+        recovered_signed_transaction.from().unwrap()
+    );
 }
