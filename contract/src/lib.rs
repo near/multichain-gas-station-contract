@@ -1,7 +1,7 @@
 use ethers_core::{
     types::{transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, U256},
     utils::{
-        hex::{self},
+        hex,
         rlp::{Decodable, Rlp},
     },
 };
@@ -22,7 +22,8 @@ use near_sdk::{
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
 #[allow(clippy::wildcard_imports)]
-use near_sdk_contract_tools::{owner::*, standard::nep297::Event, Owner};
+use near_sdk_contract_tools::{owner::*, pause::*};
+use near_sdk_contract_tools::{standard::nep297::Event, Owner, Pause};
 use schemars::JsonSchema;
 
 pub mod asset;
@@ -134,10 +135,8 @@ pub enum StorageKey {
     SignedTransactionSequences,
 }
 
-// TODO: Pausability
 // TODO: Storage management
-// TODO: Ensure sufficient balance on foreign chain
-#[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Owner)]
+#[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Owner, Pause)]
 #[near_bindgen]
 pub struct Contract {
     pub next_unique_id: u64,
@@ -198,6 +197,8 @@ impl Contract {
         transaction_rlp_hex: String,
         use_paymaster: Option<bool>,
     ) -> PromiseOrValue<TransactionCreation> {
+        <Self as Pause>::require_unpaused();
+
         let deposit = env::attached_deposit();
         require!(deposit > 0, "Deposit is required to pay for gas");
 
@@ -343,6 +344,8 @@ impl Contract {
     }
 
     pub fn sign_next(&mut self, id: U64) -> Promise {
+        <Self as Pause>::require_unpaused();
+
         let id = id.0;
 
         let transaction = self
@@ -487,6 +490,8 @@ impl Contract {
     }
 
     pub fn remove_transaction(&mut self, id: U64) -> PromiseOrValue<()> {
+        <Self as Pause>::require_unpaused();
+
         let transaction = self
             .pending_transaction_sequences
             .get(&id.0)
