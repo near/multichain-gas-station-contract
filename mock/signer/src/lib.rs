@@ -1,10 +1,11 @@
 use lib::{
+    chain_key::*,
     kdf,
     signer::{MpcSignature, SignerInterface},
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    env, near_bindgen, PromiseOrValue, PublicKey,
+    env, near_bindgen, AccountId, PromiseOrValue, PublicKey,
 };
 
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug)]
@@ -24,5 +25,36 @@ impl SignerInterface for Contract {
         "secp256k1:37aFybhUHCxRdDkuCcB3yHzxqK7N8EQ745MujyAQohXSsYymVeHzhLxKvZ2qYeRHf3pGFiAsxqFJZjpF9gP2JV5u"
             .parse()
             .unwrap()
+    }
+}
+
+#[near_bindgen]
+impl ChainKeySign for Contract {
+    fn ck_scheme_oid(&self) -> String {
+        "1.3.132.0.10".to_string()
+    }
+
+    fn ck_sign_hash(
+        &mut self,
+        owner_id: Option<AccountId>,
+        path: String,
+        payload: Vec<u8>,
+    ) -> PromiseOrValue<ChainKeySignature> {
+        let owner_id = owner_id
+            .unwrap_or_else(env::predecessor_account_id)
+            .as_bytes()
+            .to_vec();
+
+        let signing_key = kdf::construct_spoof_key(&owner_id, path.as_bytes());
+        let (sig, recid) = signing_key.sign_prehash_recoverable(&payload).unwrap();
+
+        PromiseOrValue::Value(
+            ethers_core::types::Signature {
+                r: sig.r().to_bytes().as_slice().into(),
+                s: sig.s().to_bytes().as_slice().into(),
+                v: recid.to_byte().into(),
+            }
+            .to_string(),
+        )
     }
 }

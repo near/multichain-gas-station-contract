@@ -26,21 +26,27 @@ impl NftKeyContract {
         }
     }
 
-    pub fn mint(&mut self) {
+    pub fn mint(&mut self) -> String {
         let id = self.next_id;
         self.next_id += 1;
+
+        let id = id.to_string();
+
         Nep171Controller::mint(
             self,
             &Nep171Mint {
-                token_ids: &[id.to_string()],
+                token_ids: std::array::from_ref(&id),
                 receiver_id: &env::predecessor_account_id(),
                 memo: None,
             },
         )
         .expect_or_reject("Failed to mint new key token");
+
+        id
     }
 }
 
+#[near_bindgen]
 impl ChainKeySign for NftKeyContract {
     fn ck_sign_hash(
         &mut self,

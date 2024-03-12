@@ -2563,6 +2563,8 @@ dependencies = [
  "lib",
  "near-sdk",
  "near-sdk-contract-tools",
+ "near-workspaces",
+ "tokio",
 ]
 
 [[package]]
@@ -3871,6 +3873,7 @@ dependencies = [
 name = "signer"
 version = "0.1.0"
 dependencies = [
+ "ethers-core",
  "lib",
  "near-sdk",
 ]
