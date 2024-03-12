@@ -1,5 +1,5 @@
 use lib::{
-    chain_key::{ext_chain_key_approved, ChainKeyManager, ChainKeySignature},
+    chain_key::{ext_chain_key_approved, ChainKeySign, ChainKeyApproval, ChainKeySignature},
     signer::ext_signer,
 };
 use near_sdk::{
@@ -46,12 +46,41 @@ impl ManagerContract {
 }
 
 #[near_bindgen]
-impl ChainKeyManager for ManagerContract {
+impl ChainKeySign for ManagerContract {
     fn ck_scheme_oid(&self) -> String {
         // Secp256k1 -> prehash is 32 bytes
         "1.3.132.0.10".to_string()
     }
 
+    fn ck_sign_hash(
+        &mut self,
+        owner_id: Option<AccountId>,
+        path: String,
+        payload: Vec<u8>,
+    ) -> PromiseOrValue<ChainKeySignature> {
+        let payload: [u8; 32] = payload
+            .try_into()
+            .unwrap_or_else(|_| env::panic_str("Invalid payload length"));
+
+        let predecessor = env::predecessor_account_id();
+        let owner_id = owner_id.unwrap_or_else(|| predecessor.clone());
+
+        let key_id = KeyId(owner_id.clone(), path.clone());
+
+        require!(
+            owner_id == env::predecessor_account_id() || self.is_approved(&key_id, &predecessor),
+            "Unauthorized",
+        );
+
+        PromiseOrValue::Promise(
+            ext_signer::ext(self.signer_contract_id.clone())
+                .sign(payload, &format!("{}/{}", owner_id, path)),
+        )
+    }
+}
+
+#[near_bindgen]
+impl ChainKeyApproval for ManagerContract {
     fn ck_approve(
         &mut self,
         path: String,
@@ -143,31 +172,5 @@ impl ChainKeyManager for ManagerContract {
 
     fn ck_is_approved(&self, owner_id: AccountId, path: String, account_id: AccountId) -> bool {
         self.is_approved(&KeyId(owner_id, path), &account_id)
-    }
-
-    fn ck_sign_hash(
-        &mut self,
-        owner_id: Option<AccountId>,
-        path: String,
-        payload: Vec<u8>,
-    ) -> PromiseOrValue<ChainKeySignature> {
-        let payload: [u8; 32] = payload
-            .try_into()
-            .unwrap_or_else(|_| env::panic_str("Invalid payload length"));
-
-        let predecessor = env::predecessor_account_id();
-        let owner_id = owner_id.unwrap_or_else(|| predecessor.clone());
-
-        let key_id = KeyId(owner_id.clone(), path.clone());
-
-        require!(
-            owner_id == env::predecessor_account_id() || self.is_approved(&key_id, &predecessor),
-            "Unauthorized",
-        );
-
-        PromiseOrValue::Promise(
-            ext_signer::ext(self.signer_contract_id.clone())
-                .sign(payload, &format!("{}/{}", owner_id, path)),
-        )
     }
 }

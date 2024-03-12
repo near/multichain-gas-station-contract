@@ -1,4 +1,4 @@
-use lib::chain_key::{ext_chain_key_manager, ChainKeyApproved, ChainKeySignature};
+use lib::chain_key::{ext_chain_key_sign, ChainKeyApproved, ChainKeySignature};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, near_bindgen, require,
@@ -41,7 +41,7 @@ impl ApprovedContract {
         require!(payload[0] == 0xff, "Invalid payload");
 
         PromiseOrValue::Promise(
-            ext_chain_key_manager::ext(self.manager_id.clone()).ck_sign_hash(
+            ext_chain_key_sign::ext(self.manager_id.clone()).ck_sign_hash(
                 Some(owner_id),
                 path,
                 payload,
