@@ -1,0 +1,13 @@
+[package]
+name = "nft-key"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+near-sdk.workspace = true
+near-sdk-contract-tools.workspace = true
+lib = { path = "../../lib" }
+
+[lib]
+crate-type = ["cdylib"]
