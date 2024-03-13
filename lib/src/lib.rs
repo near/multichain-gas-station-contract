@@ -3,6 +3,7 @@ use std::fmt::Display;
 use near_sdk::env;
 
 pub mod foreign_address;
+pub mod gas_station;
 pub mod kdf;
 pub mod oracle;
 pub mod signer;

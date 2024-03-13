@@ -8,7 +8,9 @@ use near_sdk::{
 };
 use near_sdk_contract_tools::owner::Owner;
 
-use crate::{Contract, ContractExt, Flags, StorageKey, DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS};
+use crate::{
+    asset::AssetId, Contract, ContractExt, Flags, StorageKey, DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS,
+};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
@@ -29,7 +31,7 @@ impl Contract {
     pub fn new_debug(
         signer_contract_id: AccountId,
         oracle_id: AccountId,
-        oracle_local_asset_id: String,
+        supported_assets_oracle_asset_ids: std::collections::HashMap<AssetId, String>,
         expire_sequence_after_blocks: Option<U64>,
     ) -> Self {
         let mut contract = Self {
@@ -37,7 +39,7 @@ impl Contract {
             signer_contract_id,
             signer_contract_public_key: None, // Loaded asynchronously
             oracle_id,
-            oracle_local_asset_id,
+            supported_assets_oracle_asset_ids: UnorderedMap::new(StorageKey::SupportedAssets),
             flags: Flags::default(),
             expire_sequence_after_blocks: expire_sequence_after_blocks
                 .map_or(DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS, u64::from),
@@ -50,6 +52,10 @@ impl Contract {
             signed_transaction_sequences: Vector::new(StorageKey::SignedTransactionSequences),
             collected_fees: UnorderedMap::new(StorageKey::CollectedFees),
         };
+
+        contract
+            .supported_assets_oracle_asset_ids
+            .extend(supported_assets_oracle_asset_ids);
 
         Owner::update_owner(&mut contract, Some(env::predecessor_account_id()));
 

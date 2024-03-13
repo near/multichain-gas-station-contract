@@ -7,6 +7,7 @@ use ethers_core::{
 };
 use lib::{
     foreign_address::ForeignAddress,
+    gas_station::{Nep141ReceiverCreateTransactionArgs, TransactionSequenceCreation},
     kdf::get_mpc_address,
     oracle::{ext_oracle, PriceData},
     signer::{ext_signer, MpcSignature},
@@ -21,9 +22,9 @@ use near_sdk::{
     store::{UnorderedMap, UnorderedSet, Vector},
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
+use near_sdk_contract_tools::{ft::Nep141Receiver, standard::nep297::Event, Owner, Pause};
 #[allow(clippy::wildcard_imports)]
 use near_sdk_contract_tools::{owner::*, pause::*};
-use near_sdk_contract_tools::{standard::nep297::Event, Owner, Pause};
 use schemars::JsonSchema;
 
 pub mod asset;
@@ -65,23 +66,6 @@ const DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS: u64 = 5 * 60; // 5ish minutes at 1s/
 pub struct Flags {
     pub is_sender_whitelist_enabled: bool,
     pub is_receiver_whitelist_enabled: bool,
-}
-
-#[derive(
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-    JsonSchema,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-)]
-#[serde(crate = "near_sdk::serde")]
-pub struct TransactionCreation {
-    pub id: U64,
-    pub pending_signature_count: u32,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -133,6 +117,7 @@ pub enum StorageKey {
     PendingTransactionSequences,
     CollectedFees,
     SignedTransactionSequences,
+    SupportedAssets,
 }
 
 // TODO: Storage management
@@ -143,7 +128,7 @@ pub struct Contract {
     pub signer_contract_id: AccountId,
     pub signer_contract_public_key: Option<near_sdk::PublicKey>,
     pub oracle_id: AccountId,
-    pub oracle_local_asset_id: String,
+    pub supported_assets_oracle_asset_ids: UnorderedMap<AssetId, String>,
     pub flags: Flags,
     pub expire_sequence_after_blocks: u64,
     pub foreign_chains: UnorderedMap<u64, ChainConfiguration>,
@@ -162,7 +147,7 @@ impl Contract {
     pub fn new(
         signer_contract_id: AccountId,
         oracle_id: AccountId,
-        oracle_local_asset_id: String,
+        supported_assets_oracle_asset_ids: Vec<(AssetId, String)>,
         expire_sequence_after_blocks: Option<U64>,
     ) -> Self {
         let mut contract = Self {
@@ -170,7 +155,7 @@ impl Contract {
             signer_contract_id,
             signer_contract_public_key: None, // Loaded asynchronously
             oracle_id,
-            oracle_local_asset_id,
+            supported_assets_oracle_asset_ids: UnorderedMap::new(StorageKey::SupportedAssets),
             flags: Flags::default(),
             expire_sequence_after_blocks: expire_sequence_after_blocks
                 .map_or(DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS, u64::from),
@@ -184,6 +169,10 @@ impl Contract {
             collected_fees: UnorderedMap::new(StorageKey::CollectedFees),
         };
 
+        contract
+            .supported_assets_oracle_asset_ids
+            .extend(supported_assets_oracle_asset_ids);
+
         Owner::init(&mut contract, &env::predecessor_account_id());
 
         contract
@@ -196,57 +185,78 @@ impl Contract {
         &mut self,
         transaction_rlp_hex: String,
         use_paymaster: Option<bool>,
-    ) -> PromiseOrValue<TransactionCreation> {
-        <Self as Pause>::require_unpaused();
+    ) -> PromiseOrValue<TransactionSequenceCreation> {
+        self.create_transaction_inner(
+            env::predecessor_account_id(),
+            transaction_rlp_hex,
+            use_paymaster,
+            AssetBalance::native(env::attached_deposit()),
+        )
+    }
 
-        let deposit = env::attached_deposit();
-        require!(deposit > 0, "Deposit is required to pay for gas");
+    fn create_transaction_inner(
+        &mut self,
+        account_id: AccountId,
+        transaction_rlp_hex: String,
+        use_paymaster: Option<bool>,
+        deposit: AssetBalance,
+    ) -> PromiseOrValue<TransactionSequenceCreation> {
+        <Self as Pause>::require_unpaused();
 
         let transaction =
             ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
                 .unwrap_or_reject();
 
         // Guarantees invariants required in callback
-        self.filter_transaction(&env::predecessor_account_id(), &transaction);
+        self.filter_transaction(&account_id, &transaction);
 
         let use_paymaster = use_paymaster.unwrap_or(false);
 
         if use_paymaster {
+            require!(deposit.amount.0 > 0, "Deposit is required to pay for gas");
+
+            let supported_asset_oracle_asset_id = self
+                .supported_assets_oracle_asset_ids
+                .get(&deposit.asset_id)
+                .expect_or_reject("Unsupported deposit asset");
+
             let chain_id = transaction.chain_id();
             let foreign_chain_configuration = self.get_chain(chain_id.as_u64()).unwrap_or_reject();
 
             ext_oracle::ext(self.oracle_id.clone())
                 .get_price_data(Some(vec![
-                    self.oracle_local_asset_id.clone(),
+                    supported_asset_oracle_asset_id.clone(),
                     foreign_chain_configuration.oracle_asset_id.clone(),
                 ]))
                 .then(
                     Self::ext(env::current_account_id()).create_transaction_callback(
-                        env::predecessor_account_id(),
-                        deposit.into(),
+                        account_id,
+                        deposit,
+                        supported_asset_oracle_asset_id.clone(),
                         transaction,
                     ),
                 )
                 .into()
         } else {
-            let predecessor = env::predecessor_account_id();
-
             let chain_id = transaction.chain_id;
 
             let pending_transaction_sequence = PendingTransactionSequence {
-                signature_requests: vec![SignatureRequest::new(&predecessor, transaction, false)],
-                created_by_account_id: predecessor,
+                signature_requests: vec![SignatureRequest::new(&account_id, transaction, false)],
+                created_by_account_id: account_id,
                 created_at_block_height: env::block_height().into(),
                 escrow: None,
             };
 
+            let creation = self.insert_transaction_sequence(pending_transaction_sequence.clone());
+
             ContractEvent::TransactionSequenceCreated(TransactionSequenceCreated {
+                id: creation.id,
                 foreign_chain_id: chain_id.to_string(),
-                pending_transaction_sequence: pending_transaction_sequence.clone(),
+                pending_transaction_sequence,
             })
             .emit();
 
-            PromiseOrValue::Value(self.insert_pending_transaction(pending_transaction_sequence))
+            PromiseOrValue::Value(creation)
         }
     }
 
@@ -254,10 +264,11 @@ impl Contract {
     pub fn create_transaction_callback(
         &mut self,
         #[serializer(borsh)] sender: AccountId,
-        #[serializer(borsh)] deposit: near_sdk::json_types::U128,
+        #[serializer(borsh)] deposit: AssetBalance,
+        #[serializer(borsh)] oracle_asset_id: String,
         #[serializer(borsh)] transaction_request: ValidTransactionRequest,
         #[callback_result] result: Result<PriceData, PromiseError>,
-    ) -> TransactionCreation {
+    ) -> TransactionSequenceCreation {
         // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
         let foreign_chain_configuration = self
             .foreign_chains
@@ -273,11 +284,11 @@ impl Contract {
             * transaction_request.max_fee_per_gas(); // Validation ensures gas is set.
 
         let fee = foreign_chain_configuration.foreign_token_price(
-            &self.oracle_local_asset_id,
+            &oracle_asset_id,
             &price_data,
             request_tokens_for_gas,
         );
-        let deposit = deposit.0;
+        let deposit = deposit.amount.0;
 
         match deposit.checked_sub(fee) {
             None => {
@@ -334,13 +345,16 @@ impl Contract {
             escrow: Some(AssetBalance::native(fee)),
         };
 
+        let creation = self.insert_transaction_sequence(pending_transaction_sequence.clone());
+
         ContractEvent::TransactionSequenceCreated(TransactionSequenceCreated {
+            id: creation.id,
             foreign_chain_id: chain_id.to_string(),
-            pending_transaction_sequence: pending_transaction_sequence.clone(),
+            pending_transaction_sequence,
         })
         .emit();
 
-        self.insert_pending_transaction(pending_transaction_sequence)
+        creation
     }
 
     pub fn sign_next(&mut self, id: U64) -> Promise {
@@ -463,6 +477,7 @@ impl Contract {
 
         if let Some(all_signatures) = all_signatures {
             let e = TransactionSequenceSigned {
+                id: id.into(),
                 foreign_chain_id: chain_id.to_string(),
                 created_by_account_id: pending_transaction_sequence.created_by_account_id.clone(),
                 signed_transactions: all_signatures
@@ -525,6 +540,59 @@ impl Contract {
         self.pending_transaction_sequences.remove(&id.0);
 
         ret
+    }
+}
+
+#[near_bindgen]
+impl Nep141Receiver for Contract {
+    fn ft_on_transfer(
+        &mut self,
+        sender_id: AccountId,
+        amount: U128,
+        msg: String,
+    ) -> PromiseOrValue<U128> {
+        // TODO: Some way to inform the sender_id of the transaction ID that just got created
+
+        let asset_id = AssetId::Nep141(env::predecessor_account_id());
+
+        let asset_is_supported = self
+            .supported_assets_oracle_asset_ids
+            .contains_key(&asset_id);
+
+        if !asset_is_supported {
+            // Unknown assets: ignore.
+            return PromiseOrValue::Value(0.into());
+        }
+
+        let args = if let Ok(args) =
+            near_sdk::serde_json::from_str::<Nep141ReceiverCreateTransactionArgs>(&msg)
+        {
+            args
+        } else {
+            return PromiseOrValue::Value(0.into());
+        };
+
+        let creation_promise_or_value = self.create_transaction_inner(
+            sender_id,
+            args.transaction_rlp_hex,
+            args.use_paymaster,
+            AssetBalance { asset_id, amount },
+        );
+
+        match creation_promise_or_value {
+            PromiseOrValue::Promise(p) => p
+                .then(Self::ext(env::current_account_id()).return_zero())
+                .into(),
+            PromiseOrValue::Value(_v) => PromiseOrValue::Value(U128(0)),
+        }
+    }
+}
+
+#[near_bindgen]
+impl Contract {
+    #[private]
+    pub fn return_zero(&self) -> U128 {
+        U128(0)
     }
 }
 
@@ -593,10 +661,10 @@ impl Contract {
         }
     }
 
-    fn insert_pending_transaction(
+    fn insert_transaction_sequence(
         &mut self,
         pending_transaction: PendingTransactionSequence,
-    ) -> TransactionCreation {
+    ) -> TransactionSequenceCreation {
         #[allow(clippy::cast_possible_truncation)]
         let pending_signature_count = pending_transaction.signature_requests.len() as u32;
 
@@ -605,7 +673,7 @@ impl Contract {
         self.pending_transaction_sequences
             .insert(id, pending_transaction);
 
-        TransactionCreation {
+        TransactionSequenceCreation {
             id: id.into(),
             pending_signature_count,
         }

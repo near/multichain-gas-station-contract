@@ -293,6 +293,7 @@ impl Contract {
 
     pub fn list_pending_transaction_sequences(
         &self,
+        account_id: Option<AccountId>,
         offset: Option<u32>,
         limit: Option<u32>,
     ) -> std::collections::HashMap<String, &PendingTransactionSequence> {
@@ -301,6 +302,11 @@ impl Contract {
         v.sort_by_cached_key(|&(id, _)| *id);
 
         v.into_iter()
+            .filter(|(_, tx)| {
+                account_id
+                    .as_ref()
+                    .map_or(true, |account_id| &tx.created_by_account_id == account_id)
+            })
             .skip(offset.map_or(0, |o| o as usize))
             .take(limit.map_or(usize::MAX, |l| l as usize))
             .map(|(id, tx)| (id.to_string(), tx))
@@ -365,7 +371,12 @@ impl Contract {
         .unwrap()
     }
 
-    pub fn estimate_gas_cost(&self, transaction_rlp_hex: String, price_data: PriceData) -> U128 {
+    pub fn estimate_gas_cost(
+        &self,
+        transaction_rlp_hex: String,
+        price_data: PriceData,
+        deposit_asset_id: Option<AssetId>,
+    ) -> U128 {
         let transaction =
             ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
                 .expect_or_reject("Invalid transaction request");
@@ -376,12 +387,14 @@ impl Contract {
         let request_tokens_for_gas =
             (transaction.gas() + paymaster_transaction_gas) * transaction.max_fee_per_gas();
 
+        let deposit_asset_id = deposit_asset_id.unwrap_or(AssetId::Native);
+        let oracle_asset_id = self
+            .supported_assets_oracle_asset_ids
+            .get(&deposit_asset_id)
+            .expect_or_reject("Unsupported deposit asset");
+
         foreign_chain_configuration
-            .foreign_token_price(
-                &self.oracle_local_asset_id,
-                &price_data,
-                request_tokens_for_gas,
-            )
+            .foreign_token_price(oracle_asset_id, &price_data, request_tokens_for_gas)
             .into()
     }
 }

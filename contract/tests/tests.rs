@@ -1,14 +1,17 @@
 // NOTE: If tests fail due to a directory not existing error, create `target/near/{contract,oracle,signer}`
 
 use contract::{
-    chain_configuration::ViewPaymasterConfiguration, contract_event::TransactionSequenceSigned,
-    TransactionCreation,
+    asset::AssetId, chain_configuration::ViewPaymasterConfiguration,
+    contract_event::TransactionSequenceSigned,
 };
 use ethers_core::{
     types::transaction::eip2718::TypedTransaction,
     utils::{self, hex, rlp::Rlp},
 };
-use lib::{foreign_address::ForeignAddress, kdf::get_mpc_address, signer::MpcSignature};
+use lib::{
+    foreign_address::ForeignAddress, gas_station::TransactionSequenceCreation,
+    kdf::get_mpc_address, signer::MpcSignature,
+};
 use near_sdk::serde_json::json;
 use near_workspaces::{
     operations::Function,
@@ -49,7 +52,9 @@ async fn test_workflow_happy_path() {
         .call(Function::new("new").args_json(json!({
             "signer_contract_id": signer.id(),
             "oracle_id": oracle.id(),
-            "oracle_local_asset_id": "wrap.testnet",
+            "supported_assets_oracle_asset_ids": [
+                [AssetId::Native, "wrap.testnet"],
+            ],
         })))
         .call(
             Function::new("refresh_signer_public_key")
@@ -122,7 +127,7 @@ async fn test_workflow_happy_path() {
         .transact()
         .await
         .unwrap()
-        .json::<TransactionCreation>()
+        .json::<TransactionSequenceCreation>()
         .unwrap();
 
     println!("Transaction created.");
@@ -192,6 +197,7 @@ async fn test_workflow_happy_path() {
     assert_eq!(
         signed_transaction_sequences,
         vec![TransactionSequenceSigned {
+            id: tx.id,
             foreign_chain_id: "0".to_string(),
             created_by_account_id: alice.id().as_str().parse().unwrap(),
             signed_transactions: vec![signed_tx_1, signed_tx_2],
