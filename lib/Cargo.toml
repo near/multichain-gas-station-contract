@@ -9,6 +9,7 @@ getrandom = { version = "0.2", features = [
     "custom",
 ] } # make this package happy for wasm target
 near-sdk.workspace = true
+near-sdk-contract-tools.workspace = true
 schemars.workspace = true
 thiserror.workspace = true
 

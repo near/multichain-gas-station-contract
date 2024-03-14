@@ -1964,6 +1964,7 @@ dependencies = [
  "ethers-core",
  "getrandom 0.2.12",
  "near-sdk",
+ "near-sdk-contract-tools",
  "schemars",
  "sha2",
  "thiserror",

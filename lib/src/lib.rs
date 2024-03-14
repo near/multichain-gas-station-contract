@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use near_sdk::env;
 
+pub mod asset;
 pub mod chain_key;
 pub mod foreign_address;
 pub mod gas_station;

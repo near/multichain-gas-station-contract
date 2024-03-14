@@ -11,7 +11,6 @@ use near_sdk::{
 use near_sdk_contract_tools::owner::{Owner, OwnerExternal};
 
 use crate::{
-    asset::AssetId,
     chain_configuration::{ChainConfiguration, PaymasterConfiguration, ViewPaymasterConfiguration},
     contract_event::TransactionSequenceSigned,
     decode_transaction_request,
@@ -19,8 +18,8 @@ use crate::{
     Contract, ContractExt, Flags, GetForeignChain, PendingTransactionSequence, StorageKey,
 };
 use lib::{
-    foreign_address::ForeignAddress, kdf::get_mpc_address, oracle::PriceData, signer::ext_signer,
-    Rejectable,
+    asset::AssetId, foreign_address::ForeignAddress, kdf::get_mpc_address, oracle::PriceData,
+    signer::ext_signer, Rejectable,
 };
 
 #[allow(clippy::needless_pass_by_value)]

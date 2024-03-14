@@ -8,9 +8,8 @@ use near_sdk::{
 };
 use near_sdk_contract_tools::owner::Owner;
 
-use crate::{
-    asset::AssetId, Contract, ContractExt, Flags, StorageKey, DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS,
-};
+use crate::{Contract, ContractExt, Flags, StorageKey, DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS};
+use lib::asset::AssetId;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]

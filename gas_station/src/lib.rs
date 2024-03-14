@@ -6,6 +6,7 @@ use ethers_core::{
     },
 };
 use lib::{
+    asset::{AssetBalance, AssetId},
     foreign_address::ForeignAddress,
     gas_station::{Nep141ReceiverCreateTransactionArgs, TransactionSequenceCreation},
     kdf::get_mpc_address,
@@ -26,9 +27,6 @@ use near_sdk_contract_tools::{ft::Nep141Receiver, standard::nep297::Event, Owner
 #[allow(clippy::wildcard_imports)]
 use near_sdk_contract_tools::{owner::*, pause::*};
 use schemars::JsonSchema;
-
-pub mod asset;
-use asset::{AssetBalance, AssetId};
 
 pub mod chain_configuration;
 use chain_configuration::ChainConfiguration;

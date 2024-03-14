@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["gas-station", "key-manager", "lib", "mock/*"]
+members = ["gas_station", "key_manager", "lib", "mock/*"]
 
 [workspace.dependencies]
 ethers-core = "2.0.13"
