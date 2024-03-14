@@ -15,12 +15,12 @@ use crate::foreign_address::ForeignAddress;
 pub type PublicKey = <Secp256k1 as CurveArithmetic>::AffinePoint;
 
 #[cfg(target_arch = "wasm32")]
-fn sha256(bytes: &[u8]) -> Vec<u8> {
+pub fn sha256(bytes: &[u8]) -> Vec<u8> {
     near_sdk::env::sha256(bytes)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn sha256(bytes: &[u8]) -> Vec<u8> {
+pub fn sha256(bytes: &[u8]) -> Vec<u8> {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(bytes);
@@ -94,13 +94,11 @@ pub fn near_public_key_to_affine(
     affine.ok_or(PublicKeyConversionError::InvalidKeyData)
 }
 
-/// TODO: The value returned by this function conflicts with that recovered from signatures. Requires further investigation.
 /// Calculates the public key of the MPC signer for the given account ID and derivation path.
 ///
 /// # Errors
 ///
 /// Returns an error if the public key is not a valid SECP256K1 key.
-#[cfg(not(feature = "debug"))]
 pub fn get_mpc_address(
     mpc_public_key: near_sdk::PublicKey,
     gas_station_account_id: &AccountId,
@@ -108,91 +106,6 @@ pub fn get_mpc_address(
 ) -> Result<ForeignAddress, PublicKeyConversionError> {
     let affine = near_public_key_to_affine(mpc_public_key)?;
     Ok(derive_evm_address_for_account(affine, gas_station_account_id, caller_account_id).into())
-}
-
-#[cfg(feature = "debug")]
-pub fn get_mpc_address(
-    _mpc_public_key: near_sdk::PublicKey,
-    predecessor_account_id: &AccountId,
-    path: &str,
-) -> Result<ForeignAddress, PublicKeyConversionError> {
-    let signing_key = construct_spoof_key(predecessor_account_id.as_bytes(), path.as_bytes());
-    Ok(ethers_core::utils::secret_key_to_address(&signing_key).into())
-}
-
-/// WARNING: THIS IS BAD BAD BAD PRACTICE, DO NOT USE IN PRODUCTION CODE!!!!!
-#[cfg(feature = "debug")]
-#[must_use]
-pub fn construct_spoof_key(
-    predecessor: &[u8],
-    path: &[u8],
-) -> ethers_core::k256::ecdsa::SigningKey {
-    let predecessor_hash = sha256([predecessor, b",", path].concat().as_slice());
-    ethers_core::k256::ecdsa::SigningKey::from_bytes(predecessor_hash.as_slice().into()).unwrap()
-}
-
-#[test]
-#[cfg(feature = "debug")]
-fn test_spoof() {
-    use ethers_core::{types::transaction::eip2718::TypedTransaction, utils::rlp::Rlp};
-
-    use crate::signer::MpcSignature;
-
-    let useless_public_key: near_sdk::PublicKey = "secp256k1:47xve2ymatpG4x4Gp7pmYwuLJk7eeRegrFuS4VoW5VV4i3GsBiBY87vkH6UZiiY18NeZnkBzcZzipDbJJ5pmjTcc"
-        .parse()
-        .unwrap();
-
-    let gas_station_account: AccountId = "canhazgas.testnet".parse().unwrap();
-    let path: AccountId = "hatchet.testnet".parse().unwrap();
-
-    let eth_transaction =
-        TypedTransaction::Eip1559(ethers_core::types::Eip1559TransactionRequest {
-            from: None,
-            to: Some(ForeignAddress([0x0f; 20]).into()),
-            gas: Some(21000.into()),
-            value: Some(1234.into()),
-            data: None,
-            nonce: Some(7777.into()),
-            access_list: vec![].into(),
-            max_priority_fee_per_gas: Some(1234.into()),
-            max_fee_per_gas: Some(1234.into()),
-            chain_id: Some(0.into()),
-        });
-
-    let m = eth_transaction.sighash().to_fixed_bytes();
-
-    let signing_key = construct_spoof_key(gas_station_account.as_bytes(), path.as_bytes());
-    let (sig, recid) = signing_key.sign_prehash_recoverable(&m).unwrap();
-
-    let eth_sig = ethers_core::types::Signature {
-        r: sig.r().to_bytes().as_slice().into(),
-        s: sig.s().to_bytes().as_slice().into(),
-        v: u64::from(recid.to_byte()),
-    };
-    let eth_sig_from_mpc_sig = ethers_core::types::Signature::try_from(
-        MpcSignature::from_ecdsa_signature(sig, recid).unwrap(),
-    )
-    .unwrap();
-
-    assert_eq!(eth_sig, eth_sig_from_mpc_sig);
-
-    let direct = ethers_core::utils::secret_key_to_address(&signing_key);
-    let recovered = eth_sig.recover(m).unwrap();
-    assert_eq!(direct, recovered);
-
-    let signed_tx_bytes = eth_transaction.rlp_signed(&eth_sig);
-    let signed_tx_rlp = Rlp::new(&signed_tx_bytes);
-    let (signed_tx, _recovered_signature) =
-        TypedTransaction::decode_signed(&signed_tx_rlp).unwrap();
-
-    assert_eq!(signed_tx.sighash(), eth_transaction.sighash());
-
-    assert_eq!(
-        signed_tx.from().unwrap(),
-        &get_mpc_address(useless_public_key, &gas_station_account, path.as_str())
-            .unwrap()
-            .into(),
-    );
 }
 
 #[test]

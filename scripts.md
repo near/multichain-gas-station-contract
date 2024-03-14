@@ -5,7 +5,7 @@
 1. Deploy
 
    ```sh
-   near contract deploy canhazgas.testnet use-file ./target/wasm32-unknown-unknown/release/gas_station.wasm with-init-call new_debug json-args '{"signer_contract_id":"signer.canhazgas.testnet","oracle_id":"priceoracle.testnet","oracle_local_asset_id":"wrap.testnet"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
+   near contract deploy canhazgas.testnet use-file ./target/wasm32-unknown-unknown/release/gas_station.wasm with-init-call new_debug json-args '{"signer_contract_id":"multichain-testnet-2.testnet","oracle_id":"priceoracle.testnet","oracle_local_asset_id":"wrap.testnet"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
    ```
 
 2. Refresh signer key
@@ -31,13 +31,13 @@
 1. Create transaction sequence
 
    ```sh
-   near contract call-function as-transaction canhazgas.testnet create_transaction json-args '{"transaction_rlp_hex":"e5821e618222b882520894abababababababababababababababababababab8204d280808080","use_paymaster":true}' prepaid-gas '100.0 Tgas' attached-deposit '0.5 NEAR' sign-as hatchet.testnet network-config testnet sign-with-legacy-keychain send
+   near contract call-function as-transaction canhazgas.testnet create_transaction json-args '{"transaction_rlp_hex":"0xe7618222bb8204d28204d2825208940f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f8204d280c0","use_paymaster":true}' prepaid-gas '100.0 Tgas' attached-deposit '0.5 NEAR' sign-as hatchet.testnet network-config testnet sign-with-legacy-keychain send
    ```
 
 2. Sign each transaction (perform 1+ times)
 
    ```sh
-   near contract call-function as-transaction canhazgas.testnet sign_next json-args '{"id":"34"}' prepaid-gas '300.0 Tgas' attached-deposit '0 NEAR' sign-as hatchet.testnet network-config testnet sign-with-legacy-keychain send
+   near contract call-function as-transaction canhazgas.testnet sign_next json-args '{"id":"0"}' prepaid-gas '300.0 Tgas' attached-deposit '0 NEAR' sign-as hatchet.testnet network-config testnet sign-with-legacy-keychain send
    ```
 
 ## Maintenance

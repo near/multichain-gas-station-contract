@@ -1,5 +1,5 @@
 use lib::{
-    chain_key::{ext_chain_key_approved, ChainKeySign, ChainKeyApproval, ChainKeySignature},
+    chain_key::{ext_chain_key_approved, ChainKeyApproval, ChainKeySign, ChainKeySignature},
     signer::ext_signer,
 };
 use near_sdk::{

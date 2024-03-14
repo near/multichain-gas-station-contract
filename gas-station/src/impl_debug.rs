@@ -1,20 +1,16 @@
-use std::str::FromStr;
-
-use lib::{
-    kdf,
-    signer::{MpcSignature, SignerInterface},
-};
 use near_sdk::{
     env,
     json_types::{Base64VecU8, U64},
     near_bindgen,
     serde::{Deserialize, Serialize},
     store::{UnorderedMap, UnorderedSet, Vector},
-    AccountId, PromiseOrValue,
+    AccountId,
 };
 use near_sdk_contract_tools::owner::Owner;
 
-use crate::{Contract, ContractExt, Flags, StorageKey, DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS};
+use crate::{
+    asset::AssetId, Contract, ContractExt, Flags, StorageKey, DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS,
+};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
@@ -35,7 +31,7 @@ impl Contract {
     pub fn new_debug(
         signer_contract_id: AccountId,
         oracle_id: AccountId,
-        oracle_local_asset_id: String,
+        supported_assets_oracle_asset_ids: std::collections::HashMap<AssetId, String>,
         expire_sequence_after_blocks: Option<U64>,
     ) -> Self {
         let mut contract = Self {
@@ -43,7 +39,7 @@ impl Contract {
             signer_contract_id,
             signer_contract_public_key: None, // Loaded asynchronously
             oracle_id,
-            oracle_local_asset_id,
+            supported_assets_oracle_asset_ids: UnorderedMap::new(StorageKey::SupportedAssets),
             flags: Flags::default(),
             expire_sequence_after_blocks: expire_sequence_after_blocks
                 .map_or(DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS, u64::from),
@@ -57,22 +53,12 @@ impl Contract {
             collected_fees: UnorderedMap::new(StorageKey::CollectedFees),
         };
 
+        contract
+            .supported_assets_oracle_asset_ids
+            .extend(supported_assets_oracle_asset_ids);
+
         Owner::update_owner(&mut contract, Some(env::predecessor_account_id()));
 
         contract
-    }
-}
-
-#[near_bindgen]
-impl SignerInterface for Contract {
-    fn public_key(&self) -> near_sdk::PublicKey {
-        near_sdk::PublicKey::from_str("secp256k1:4HFcTSodRLVCGNVcGc4Mf2fwBBBxv9jxkGdiW2S2CA1y6UpVVRWKj6RX7d7TDt65k2Bj3w9FU4BGtt43ZvuhCnNt").unwrap()
-    }
-
-    fn sign(&mut self, payload: [u8; 32], path: &String) -> PromiseOrValue<MpcSignature> {
-        let predecessor = env::predecessor_account_id();
-        let signing_key = kdf::construct_spoof_key(predecessor.as_bytes(), path.as_bytes());
-        let (sig, recid) = signing_key.sign_prehash_recoverable(&payload).unwrap();
-        PromiseOrValue::Value(MpcSignature::from_ecdsa_signature(sig, recid).unwrap())
     }
 }
