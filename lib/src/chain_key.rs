@@ -11,6 +11,15 @@ pub trait ChainKeySign {
         path: String,
         payload: Vec<u8>, // TODO: choose encoding...base64? Or just accept a String?
     ) -> PromiseOrValue<ChainKeySignature>;
+
+    // TODO: Should only one sign function exist, or both prehashed and unhashed versions should be required?
+    // fn ck_sign(
+    //     &mut self,
+    //     owner_id: Option<AccountId>,
+    //     path: String,
+    //     payload: Vec<u8>,
+    //     digest: String, // TODO: Is this necessary? It seems like Ethereum uses secp256k1/keccak256 whereas everyone else uses secp256k1/sha256.
+    // ) -> PromiseOrValue<ChainKeySignature>;
 }
 
 #[ext_contract(ext_chain_key_approval)]
