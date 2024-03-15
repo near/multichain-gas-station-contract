@@ -286,18 +286,18 @@ impl Contract {
             &price_data,
             request_tokens_for_gas,
         );
-        let deposit = deposit.amount.0;
+        let deposit_amount = deposit.amount.0;
 
-        match deposit.checked_sub(fee) {
+        match deposit_amount.checked_sub(fee) {
             None => {
                 env::panic_str(&format!(
-                    "Attached deposit ({deposit}) is less than fee ({fee})"
+                    "Attached deposit ({deposit_amount}) is less than fee ({fee})"
                 ));
             }
             Some(0) => {} // No refund; payment is exact.
             Some(refund) => {
                 // Refund excess
-                Promise::new(sender.clone()).transfer(refund);
+                deposit.asset_id.transfer(sender.clone(), refund);
             }
         }
 

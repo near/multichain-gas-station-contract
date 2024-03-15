@@ -8,10 +8,13 @@ use gas_station::{
     chain_configuration::ViewPaymasterConfiguration, contract_event::TransactionSequenceSigned,
 };
 use lib::{
-    asset::AssetId, foreign_address::ForeignAddress, gas_station::TransactionSequenceCreation,
-    kdf::get_mpc_address, signer::MpcSignature,
+    asset::AssetId,
+    foreign_address::ForeignAddress,
+    gas_station::{Nep141ReceiverCreateTransactionArgs, TransactionSequenceCreation},
+    kdf::get_mpc_address,
+    signer::MpcSignature,
 };
-use near_sdk::serde_json::json;
+use near_sdk::{serde::Deserialize, serde_json::json};
 use near_workspaces::{
     operations::Function,
     types::{Gas, NearToken},
@@ -21,7 +24,7 @@ use near_workspaces::{
 async fn test_workflow_happy_path() {
     let w = near_workspaces::sandbox().await.unwrap();
 
-    let (gas_station, oracle, signer) = tokio::join!(
+    let (gas_station, oracle, signer, local_ft, alice) = tokio::join!(
         async {
             let wasm = near_workspaces::compile_project("./").await.unwrap();
             w.dev_deploy(&wasm).await.unwrap()
@@ -38,11 +41,27 @@ async fn test_workflow_happy_path() {
                 .unwrap();
             w.dev_deploy(&wasm).await.unwrap()
         },
+        async {
+            let wasm = near_workspaces::compile_project("../mock/local_ft")
+                .await
+                .unwrap();
+            let c = w.dev_deploy(&wasm).await.unwrap();
+            c.call("new")
+                .args_json(json!({}))
+                .transact()
+                .await
+                .unwrap()
+                .unwrap();
+            c
+        },
+        async { w.dev_create_account().await.unwrap() },
     );
 
+    println!("{:<16} {}", "Gas Station:", gas_station.id());
     println!("{:<16} {}", "Oracle:", oracle.id());
     println!("{:<16} {}", "Signer:", signer.id());
-    println!("{:<16} {}", "Gas Station:", gas_station.id());
+    println!("{:<16} {}", "Local FT:", local_ft.id());
+    println!("{:<16} {}", "Alice:", alice.id());
 
     println!("Initializing the contract...");
 
@@ -53,6 +72,7 @@ async fn test_workflow_happy_path() {
             "oracle_id": oracle.id(),
             "supported_assets_oracle_asset_ids": [
                 [AssetId::Native, "wrap.testnet"],
+                [AssetId::Nep141(local_ft.id().as_str().parse().unwrap()), "local_ft.testnet"],
             ],
         })))
         .call(
@@ -98,8 +118,6 @@ async fn test_workflow_happy_path() {
     );
     assert_eq!(result.key_path, "$".to_string());
 
-    let alice = w.dev_create_account().await.unwrap();
-
     let eth_transaction = ethers_core::types::transaction::eip1559::Eip1559TransactionRequest {
         chain_id: Some(0.into()),
         from: None,
@@ -112,6 +130,60 @@ async fn test_workflow_happy_path() {
         value: Some(100.into()),
         nonce: Some(0.into()),
     };
+
+    println!("Testing accepting deposits with NEP-141 token...");
+
+    alice
+        .call(local_ft.id(), "mint")
+        .args_json(json!({
+            "amount": near_sdk::json_types::U128(NearToken::from_near(10).as_yoctonear()),
+        }))
+        .transact()
+        .await
+        .unwrap()
+        .unwrap();
+
+    let res = alice
+        .call(local_ft.id(), "ft_transfer_call")
+        .args_json(json!({
+            "receiver_id": gas_station.id(),
+            "amount": near_sdk::json_types::U128(NearToken::from_near(1).as_yoctonear()),
+            "msg": near_sdk::serde_json::to_string(&Nep141ReceiverCreateTransactionArgs {
+                transaction_rlp_hex: hex::encode_prefixed(&eth_transaction.rlp()),
+                use_paymaster: Some(true),
+            }).unwrap(),
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .max_gas()
+        .transact()
+        .await
+        .unwrap();
+
+    #[derive(Deserialize)]
+    #[serde(crate = "near_sdk::serde")]
+    struct Event {
+        data: EventData,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(crate = "near_sdk::serde")]
+    struct EventData {
+        id: near_sdk::json_types::U64,
+    }
+
+    let id = res
+        .logs()
+        .into_iter()
+        .find_map(|log| {
+            log.strip_prefix("EVENT_JSON:")
+                .and_then(|s| near_sdk::serde_json::from_str(s).ok())
+        })
+        .map(|e: Event| e.data.id)
+        .unwrap();
+
+    assert_eq!(id, 0.into(), "First transaction ID");
+
+    println!("Done testing accepting deposits with NEP-141 token.");
 
     println!("Creating transaction...");
 

@@ -1,0 +1,17 @@
+[package]
+name = "local-ft"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+near-sdk.workspace = true
+near-sdk-contract-tools.workspace = true
+lib = { path = "../../lib" }
+
+[dev-dependencies]
+near-workspaces = { version = "0.10", features = ["unstable"] }
+tokio = "1.28"
+
+[lib]
+crate-type = ["cdylib"]
