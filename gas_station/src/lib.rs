@@ -8,7 +8,6 @@ use ethers_core::{
 use lib::{
     asset::{AssetBalance, AssetId},
     foreign_address::ForeignAddress,
-    gas_station::{Nep141ReceiverCreateTransactionArgs, TransactionSequenceCreation},
     kdf::get_mpc_address,
     oracle::{ext_oracle, PriceData},
     signer::{ext_signer, MpcSignature},
@@ -23,9 +22,9 @@ use near_sdk::{
     store::{UnorderedMap, UnorderedSet, Vector},
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
-use near_sdk_contract_tools::{ft::Nep141Receiver, standard::nep297::Event, Owner, Pause};
 #[allow(clippy::wildcard_imports)]
 use near_sdk_contract_tools::{owner::*, pause::*};
+use near_sdk_contract_tools::{standard::nep297::Event, Owner, Pause};
 use schemars::JsonSchema;
 
 pub mod chain_configuration;
@@ -38,6 +37,7 @@ use contract_event::{ContractEvent, TransactionSequenceCreated, TransactionSeque
 mod impl_debug;
 
 mod impl_management;
+mod impl_nep141_receiver;
 
 pub mod valid_transaction_request;
 use thiserror::Error;
@@ -104,6 +104,30 @@ impl PendingTransactionSequence {
 pub struct TransactionSequenceSignedEventAt {
     pub block_height: u64,
     pub event: contract_event::TransactionSequenceSigned,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(crate = "near_sdk::serde")]
+pub struct Nep141ReceiverCreateTransactionArgs {
+    pub transaction_rlp_hex: String,
+    pub use_paymaster: Option<bool>,
+}
+
+#[derive(
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+    JsonSchema,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+)]
+#[serde(crate = "near_sdk::serde")]
+pub struct TransactionSequenceCreation {
+    pub id: U64,
+    pub pending_signature_count: u32,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, BorshStorageKey, Hash, Clone, Debug, PartialEq, Eq)]
@@ -540,60 +564,6 @@ impl Contract {
         ret
     }
 }
-
-#[near_bindgen]
-impl Nep141Receiver for Contract {
-    fn ft_on_transfer(
-        &mut self,
-        sender_id: AccountId,
-        amount: U128,
-        msg: String,
-    ) -> PromiseOrValue<U128> {
-        // TODO: Some way to inform the sender_id of the transaction ID that just got created
-
-        let asset_id = AssetId::Nep141(env::predecessor_account_id());
-
-        let asset_is_supported = self
-            .supported_assets_oracle_asset_ids
-            .contains_key(&asset_id);
-
-        if !asset_is_supported {
-            // Unknown assets: ignore.
-            return PromiseOrValue::Value(0.into());
-        }
-
-        let args = if let Ok(args) =
-            near_sdk::serde_json::from_str::<Nep141ReceiverCreateTransactionArgs>(&msg)
-        {
-            args
-        } else {
-            return PromiseOrValue::Value(0.into());
-        };
-
-        let creation_promise_or_value = self.create_transaction_inner(
-            sender_id,
-            args.transaction_rlp_hex,
-            args.use_paymaster,
-            AssetBalance { asset_id, amount },
-        );
-
-        match creation_promise_or_value {
-            PromiseOrValue::Promise(p) => p
-                .then(Self::ext(env::current_account_id()).return_zero())
-                .into(),
-            PromiseOrValue::Value(_v) => PromiseOrValue::Value(U128(0)),
-        }
-    }
-}
-
-#[near_bindgen]
-impl Contract {
-    #[private]
-    pub fn return_zero(&self) -> U128 {
-        U128(0)
-    }
-}
-
 #[derive(Debug, Error)]
 #[error("Configuration for chain ID {chain_id} does not exist")]
 pub struct ChainConfigurationDoesNotExistError {

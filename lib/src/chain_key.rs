@@ -10,8 +10,8 @@ pub trait ChainKeySign {
         owner_id: Option<AccountId>,
         path: String,
         payload: Vec<u8>, // TODO: choose encoding...base64? Or just accept a String?
-        // TODO: There may be a need for a field like this, to prove knowledge of a hash preimage.
-        // proof: Option<Vec<u8>>,
+                          // TODO: There may be a need for a field like this, to prove knowledge of a hash preimage.
+                          // proof: Option<Vec<u8>>,
     ) -> PromiseOrValue<ChainKeySignature>;
 
     // TODO: Should only one sign function exist, or both prehashed and unhashed versions should be required?
