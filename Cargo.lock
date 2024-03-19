@@ -1935,14 +1935,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "key-manager"
-version = "0.1.0"
-dependencies = [
- "lib",
- "near-sdk",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

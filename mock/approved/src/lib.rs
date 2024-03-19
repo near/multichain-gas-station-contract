@@ -29,23 +29,17 @@ impl ApprovedContract {
     }
 
     pub fn sign(&mut self, path: String, payload: Vec<u8>) -> PromiseOrValue<ChainKeySignature> {
-        let owner_id = env::predecessor_account_id();
-
-        let item = (owner_id, path);
+        let item = (env::predecessor_account_id(), path);
 
         require!(self.delegated_keys.contains(&item), "Not delegated");
 
-        let (owner_id, path) = item;
+        let path = item.1;
 
         // arbitrary payload filtering here
         require!(payload[0] == 0xff, "Invalid payload");
 
         PromiseOrValue::Promise(
-            ext_chain_key_sign::ext(self.manager_id.clone()).ck_sign_hash(
-                Some(owner_id),
-                path,
-                payload,
-            ),
+            ext_chain_key_sign::ext(self.manager_id.clone()).ck_sign_hash(path, payload),
         )
     }
 }

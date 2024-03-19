@@ -65,12 +65,9 @@ impl NftKeyContract {
 impl ChainKeySign for NftKeyContract {
     fn ck_sign_hash(
         &mut self,
-        owner_id: Option<AccountId>,
         path: String,
         payload: Vec<u8>,
     ) -> PromiseOrValue<ChainKeySignature> {
-        let _ = owner_id;
-
         let expected_owner_id = env::predecessor_account_id();
         let actual_owner_id = self.token_owner(&path);
 
@@ -87,8 +84,7 @@ impl ChainKeySign for NftKeyContract {
         );
 
         PromiseOrValue::Promise(
-            ext_chain_key_sign::ext(self.signer_contract_id.clone())
-                .ck_sign_hash(None, path, payload),
+            ext_chain_key_sign::ext(self.signer_contract_id.clone()).ck_sign_hash(path, payload),
         )
     }
 
@@ -172,10 +168,8 @@ impl ChainKeyApproval for NftKeyContract {
         len
     }
 
-    fn ck_is_approved(&self, owner_id: AccountId, path: String, account_id: AccountId) -> bool {
+    fn ck_is_approved(&self, path: String, account_id: AccountId) -> bool {
         let id: u32 = path.parse().expect_or_reject("Invalid token ID");
-        let actual_owner = Nep171Controller::token_owner(self, &path);
-        require!(actual_owner.as_ref() == Some(&owner_id), "Incorrect owner");
 
         self.approvals
             .get(&id)

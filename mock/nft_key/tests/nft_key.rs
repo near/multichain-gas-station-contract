@@ -216,4 +216,6 @@ async fn test_nft_key() {
         bob_is_no_longer_approved.is_failure(),
         "Bob is no longer approved to sign with token {token_1_id}",
     );
+
+    println!("Bob failed to sign with revoked key.");
 }
