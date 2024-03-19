@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 near-sdk.workspace = true
 near-sdk-contract-tools.workspace = true
-lib = { path = "../../lib" }
+lib = { path = "../lib" }
 
 [dev-dependencies]
 near-workspaces = { version = "0.10", features = ["unstable"] }
