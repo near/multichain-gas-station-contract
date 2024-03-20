@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 ethers-core.workspace = true
 near-sdk.workspace = true
-lib = { path = "../../lib", features = ["debug"] }
+lib = { path = "../../lib" }
 
 [lib]
 crate-type = ["cdylib"]

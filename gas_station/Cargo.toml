@@ -21,7 +21,7 @@ default = ["debug"]
 
 # enables functions only for testing purposes
 # NOT SAFE FOR PRODUCTION USE
-debug = ["lib/debug"]
+debug = []
 
 [lib]
 crate-type = ["cdylib", "rlib"]
