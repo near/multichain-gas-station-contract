@@ -1,9 +1,11 @@
-use lib::chain_key::{ext_chain_key_sign, ChainKeyApproved, ChainKeySignature};
+use lib::{
+    chain_key::{ext_chain_key_sign, ChainKeyApproved, ChainKeySignature},
+    Rejectable,
+};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    env, near_bindgen, require,
-    store::UnorderedSet,
-    AccountId, BorshStorageKey, PanicOnDefault, PromiseOrValue,
+    collections::UnorderedMap,
+    env, near_bindgen, require, AccountId, BorshStorageKey, PanicOnDefault, PromiseOrValue,
 };
 
 #[derive(BorshSerialize, BorshStorageKey)]
@@ -15,7 +17,7 @@ enum StorageKey {
 #[near_bindgen]
 pub struct ApprovedContract {
     pub manager_id: AccountId,
-    pub delegated_keys: UnorderedSet<(AccountId, String)>,
+    pub delegated_keys: UnorderedMap<String, (AccountId, u32)>,
 }
 
 #[near_bindgen]
@@ -24,47 +26,52 @@ impl ApprovedContract {
     pub fn new(manager_id: AccountId) -> Self {
         Self {
             manager_id,
-            delegated_keys: UnorderedSet::new(StorageKey::GoverningKeys),
+            delegated_keys: UnorderedMap::new(StorageKey::GoverningKeys),
         }
     }
 
     pub fn sign(&mut self, path: String, payload: Vec<u8>) -> PromiseOrValue<ChainKeySignature> {
-        let item = (env::predecessor_account_id(), path);
+        let (account_id, approval_id) = self
+            .delegated_keys
+            .get(&path)
+            .expect_or_reject("Not delegated");
 
-        require!(self.delegated_keys.contains(&item), "Not delegated");
+        require!(env::predecessor_account_id() == account_id, "Unauthorized");
 
-        let path = item.1;
-
-        // arbitrary payload filtering here
-        require!(payload[0] == 0xff, "Invalid payload");
+        // Arbitrary payload filtering here
+        // require!(payload[0] == 0xff, "Invalid payload");
 
         PromiseOrValue::Promise(
-            ext_chain_key_sign::ext(self.manager_id.clone()).ck_sign_hash(path, payload),
+            ext_chain_key_sign::ext(self.manager_id.clone()).ck_sign_hash(
+                path,
+                payload,
+                Some(approval_id),
+            ),
         )
     }
 }
 
 #[near_bindgen]
 impl ChainKeyApproved for ApprovedContract {
-    fn ck_on_approved(&mut self, owner_id: AccountId, path: String, msg: String) {
+    fn ck_on_approved(&mut self, owner_id: AccountId, path: String, approval_id: u32, msg: String) {
+        let _ = msg;
+
         require!(
             env::predecessor_account_id() == self.manager_id,
             "Unknown caller",
         );
 
-        let _ = msg;
-
-        self.delegated_keys.insert((owner_id, path));
+        self.delegated_keys.insert(&path, &(owner_id, approval_id));
     }
 
-    fn ck_on_revoked(&mut self, owner_id: AccountId, path: String, msg: String) {
+    fn ck_on_revoked(&mut self, owner_id: AccountId, path: String, approval_id: u32, msg: String) {
+        let _ = (owner_id, approval_id, msg);
+
         require!(
             env::predecessor_account_id() == self.manager_id,
             "Unknown caller",
         );
 
-        let _ = msg;
-
-        self.delegated_keys.remove(&(owner_id, path));
+        self.delegated_keys.remove(&path);
     }
 }

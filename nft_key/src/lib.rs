@@ -8,7 +8,7 @@ use lib::{
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, near_bindgen, require,
-    store::{UnorderedMap, UnorderedSet},
+    store::UnorderedMap,
     AccountId, BorshStorageKey, PanicOnDefault, PromiseOrValue,
 };
 use near_sdk_contract_tools::hook::Hook;
@@ -27,7 +27,7 @@ enum StorageKey {
 pub struct NftKeyContract {
     pub next_id: u32,
     pub signer_contract_id: AccountId,
-    pub approvals: UnorderedMap<u32, UnorderedSet<AccountId>>,
+    pub approvals: UnorderedMap<u32, UnorderedMap<AccountId, u32>>,
 }
 
 #[near_bindgen]
@@ -41,11 +41,14 @@ impl NftKeyContract {
         }
     }
 
-    pub fn mint(&mut self) -> String {
+    fn generate_id(&mut self) -> u32 {
         let id = self.next_id;
         self.next_id += 1;
+        id
+    }
 
-        let id = id.to_string();
+    pub fn mint(&mut self) -> String {
+        let id = self.generate_id().to_string();
 
         Nep171Controller::mint(
             self,
@@ -67,6 +70,7 @@ impl ChainKeySign for NftKeyContract {
         &mut self,
         path: String,
         payload: Vec<u8>,
+        approval_id: Option<u32>,
     ) -> PromiseOrValue<ChainKeySignature> {
         let expected_owner_id = env::predecessor_account_id();
         let actual_owner_id = self.token_owner(&path);
@@ -74,8 +78,9 @@ impl ChainKeySign for NftKeyContract {
         let is_approved = || {
             self.approvals
                 .get(&path.parse().expect_or_reject("Invalid token ID"))
-                .map(|set| set.contains(&expected_owner_id))
-                .unwrap_or(false)
+                .and_then(|set| set.get(&expected_owner_id))
+                .zip(approval_id)
+                .map_or(false, |(id, approval_id)| id == &approval_id)
         };
 
         require!(
@@ -84,7 +89,8 @@ impl ChainKeySign for NftKeyContract {
         );
 
         PromiseOrValue::Promise(
-            ext_chain_key_sign::ext(self.signer_contract_id.clone()).ck_sign_hash(path, payload),
+            ext_chain_key_sign::ext(self.signer_contract_id.clone())
+                .ck_sign_hash(path, payload, None),
         )
     }
 
@@ -109,15 +115,18 @@ impl ChainKeyApproval for NftKeyContract {
             format!("Unauthorized {actual_owner:?} != {predecessor}")
         );
 
+        let approval_id = self.generate_id();
+
         self.approvals
             .entry(id)
-            .or_insert_with(|| UnorderedSet::new(StorageKey::ApprovalsFor(id)))
-            .insert(account_id.clone());
+            .or_insert_with(|| UnorderedMap::new(StorageKey::ApprovalsFor(id)))
+            .insert(account_id.clone(), approval_id);
 
         msg.map_or(PromiseOrValue::Value(()), |msg| {
             PromiseOrValue::Promise(ext_chain_key_approved::ext(account_id).ck_on_approved(
                 predecessor,
                 path,
+                approval_id,
                 msg,
             ))
         })
@@ -139,12 +148,15 @@ impl ChainKeyApproval for NftKeyContract {
             return PromiseOrValue::Value(());
         };
 
-        entry.get_mut().remove(&account_id);
+        let Some(revoked_approval_id) = entry.get_mut().remove(&account_id) else {
+            return PromiseOrValue::Value(());
+        };
 
         msg.map_or(PromiseOrValue::Value(()), |msg| {
-            PromiseOrValue::Promise(ext_chain_key_approved::ext(account_id).ck_on_approved(
+            PromiseOrValue::Promise(ext_chain_key_approved::ext(account_id).ck_on_revoked(
                 predecessor,
                 path,
+                revoked_approval_id,
                 msg,
             ))
         })
@@ -168,12 +180,13 @@ impl ChainKeyApproval for NftKeyContract {
         len
     }
 
-    fn ck_is_approved(&self, path: String, account_id: AccountId) -> bool {
+    fn ck_approval_id_for(&self, path: String, account_id: AccountId) -> Option<u32> {
         let id: u32 = path.parse().expect_or_reject("Invalid token ID");
 
         self.approvals
             .get(&id)
-            .map_or(false, |approvals| approvals.contains(&account_id))
+            .and_then(|approvals| approvals.get(&account_id))
+            .copied()
     }
 }
 

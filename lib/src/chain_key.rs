@@ -9,8 +9,9 @@ pub trait ChainKeySign {
         &mut self,
         path: String,
         payload: Vec<u8>, // TODO: choose encoding...base64? Or just accept a String?
-                          // TODO: There may be a need for a field like this, to prove knowledge of a hash preimage.
-                          // proof: Option<Vec<u8>>,
+        // TODO: There may be a need for a field like this, e.g. to prove knowledge of a hash preimage.
+        // proof: Option<Vec<u8>>,
+        approval_id: Option<u32>,
     ) -> PromiseOrValue<ChainKeySignature>;
 
     // TODO: Should only one sign function exist, or both prehashed and unhashed versions should be required?
@@ -38,11 +39,23 @@ pub trait ChainKeyApproval {
         msg: Option<String>,
     ) -> PromiseOrValue<()>;
     fn ck_revoke_all(&mut self, path: String) -> u32;
-    fn ck_is_approved(&self, path: String, account_id: AccountId) -> bool;
+    fn ck_approval_id_for(&self, path: String, account_id: AccountId) -> Option<u32>;
 }
 
 #[ext_contract(ext_chain_key_approved)]
 pub trait ChainKeyApproved {
-    fn ck_on_approved(&mut self, approver_id: AccountId, path: String, msg: String);
-    fn ck_on_revoked(&mut self, approver_id: AccountId, path: String, msg: String);
+    fn ck_on_approved(
+        &mut self,
+        approver_id: AccountId,
+        path: String,
+        approval_id: u32,
+        msg: String,
+    );
+    fn ck_on_revoked(
+        &mut self,
+        approver_id: AccountId,
+        path: String,
+        approval_id: u32,
+        msg: String,
+    );
 }

@@ -5,7 +5,7 @@ use lib::{
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    env, near_bindgen, PromiseOrValue, PublicKey,
+    env, near_bindgen, require, PromiseOrValue, PublicKey,
 };
 
 pub fn construct_spoof_key(
@@ -46,7 +46,10 @@ impl ChainKeySign for Contract {
         &mut self,
         path: String,
         payload: Vec<u8>,
+        approval_id: Option<u32>,
     ) -> PromiseOrValue<ChainKeySignature> {
+        require!(approval_id.is_none(), "Approvals not supported");
+
         let signing_key =
             construct_spoof_key(env::predecessor_account_id().as_bytes(), path.as_bytes());
         let (sig, recid) = signing_key.sign_prehash_recoverable(&payload).unwrap();
