@@ -25,7 +25,11 @@ impl Nep141Receiver for Contract {
             return PromiseOrValue::Value(0.into());
         }
 
-        let args = if let Ok(args) =
+        let Nep141ReceiverCreateTransactionArgs {
+            key_path,
+            transaction_rlp_hex,
+            use_paymaster,
+        } = if let Ok(args) =
             near_sdk::serde_json::from_str::<Nep141ReceiverCreateTransactionArgs>(&msg)
         {
             args
@@ -34,9 +38,10 @@ impl Nep141Receiver for Contract {
         };
 
         let creation_promise_or_value = self.create_transaction_inner(
+            key_path,
             sender_id,
-            args.transaction_rlp_hex,
-            args.use_paymaster,
+            transaction_rlp_hex,
+            use_paymaster,
             AssetBalance { asset_id, amount },
         );
 

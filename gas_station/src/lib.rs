@@ -7,10 +7,9 @@ use ethers_core::{
 };
 use lib::{
     asset::{AssetBalance, AssetId},
+    chain_key::ext_chain_key_sign,
     foreign_address::ForeignAddress,
-    kdf::get_mpc_address,
     oracle::{ext_oracle, PriceData},
-    signer::{ext_signer, MpcSignature},
     Rejectable,
 };
 use near_sdk::{
@@ -33,9 +32,10 @@ use chain_configuration::ChainConfiguration;
 pub mod contract_event;
 use contract_event::{ContractEvent, TransactionSequenceCreated, TransactionSequenceSigned};
 
+mod impl_chain_key_nft;
+pub use impl_chain_key_nft::Nep171ReceiverMsg;
 #[cfg(feature = "debug")]
 mod impl_debug;
-
 mod impl_management;
 mod impl_nep141_receiver;
 
@@ -109,6 +109,7 @@ pub struct TransactionSequenceSignedEventAt {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(crate = "near_sdk::serde")]
 pub struct Nep141ReceiverCreateTransactionArgs {
+    pub key_path: String,
     pub transaction_rlp_hex: String,
     pub use_paymaster: Option<bool>,
 }
@@ -140,6 +141,9 @@ pub enum StorageKey {
     CollectedFees,
     SignedTransactionSequences,
     SupportedAssets,
+    ManagedKeys,
+    ManagedKeysFor(AccountId),
+    PaymasterKeys,
 }
 
 // TODO: Storage management
@@ -148,12 +152,13 @@ pub enum StorageKey {
 pub struct Contract {
     pub next_unique_id: u64,
     pub signer_contract_id: AccountId,
-    pub signer_contract_public_key: Option<near_sdk::PublicKey>,
     pub oracle_id: AccountId,
     pub supported_assets_oracle_asset_ids: UnorderedMap<AssetId, String>,
     pub flags: Flags,
     pub expire_sequence_after_blocks: u64,
     pub foreign_chains: UnorderedMap<u64, ChainConfiguration>,
+    pub user_keys: UnorderedMap<AccountId, UnorderedMap<String, Vec<u8>>>,
+    pub paymaster_keys: UnorderedMap<String, Vec<u8>>,
     pub sender_whitelist: UnorderedSet<AccountId>,
     pub receiver_whitelist: UnorderedSet<ForeignAddress>,
     pub pending_transaction_sequences: UnorderedMap<u64, PendingTransactionSequence>,
@@ -175,13 +180,14 @@ impl Contract {
         let mut contract = Self {
             next_unique_id: 0,
             signer_contract_id,
-            signer_contract_public_key: None, // Loaded asynchronously
             oracle_id,
             supported_assets_oracle_asset_ids: UnorderedMap::new(StorageKey::SupportedAssets),
             flags: Flags::default(),
             expire_sequence_after_blocks: expire_sequence_after_blocks
                 .map_or(DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS, u64::from),
             foreign_chains: UnorderedMap::new(StorageKey::ForeignChains),
+            user_keys: UnorderedMap::new(StorageKey::ManagedKeys),
+            paymaster_keys: UnorderedMap::new(StorageKey::PaymasterKeys),
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
             pending_transaction_sequences: UnorderedMap::new(
@@ -205,10 +211,12 @@ impl Contract {
     #[payable]
     pub fn create_transaction(
         &mut self,
+        key_path: String,
         transaction_rlp_hex: String,
         use_paymaster: Option<bool>,
     ) -> PromiseOrValue<TransactionSequenceCreation> {
         self.create_transaction_inner(
+            key_path,
             env::predecessor_account_id(),
             transaction_rlp_hex,
             use_paymaster,
@@ -218,6 +226,7 @@ impl Contract {
 
     fn create_transaction_inner(
         &mut self,
+        key_path: String,
         account_id: AccountId,
         transaction_rlp_hex: String,
         use_paymaster: Option<bool>,
@@ -231,6 +240,16 @@ impl Contract {
 
         // Guarantees invariants required in callback
         self.filter_transaction(&account_id, &transaction);
+
+        // Assert predecessor can use requested key path
+        let user_keys = self
+            .user_keys
+            .get(&account_id)
+            .expect_or_reject("No managed keys for predecessor");
+        require!(
+            user_keys.contains_key(&key_path),
+            "Predecessor unauthorized for the requested key path",
+        );
 
         let use_paymaster = use_paymaster.unwrap_or(false);
 
@@ -253,6 +272,7 @@ impl Contract {
                 .then(
                     Self::ext(env::current_account_id()).create_transaction_callback(
                         account_id,
+                        key_path,
                         deposit,
                         supported_asset_oracle_asset_id.clone(),
                         transaction,
@@ -263,7 +283,7 @@ impl Contract {
             let chain_id = transaction.chain_id;
 
             let pending_transaction_sequence = PendingTransactionSequence {
-                signature_requests: vec![SignatureRequest::new(&account_id, transaction, false)],
+                signature_requests: vec![SignatureRequest::new(&key_path, transaction, false)],
                 created_by_account_id: account_id,
                 created_at_block_height: env::block_height().into(),
                 escrow: None,
@@ -286,6 +306,7 @@ impl Contract {
     pub fn create_transaction_callback(
         &mut self,
         #[serializer(borsh)] sender: AccountId,
+        #[serializer(borsh)] key_path: String,
         #[serializer(borsh)] deposit: AssetBalance,
         #[serializer(borsh)] oracle_asset_id: String,
         #[serializer(borsh)] transaction_request: ValidTransactionRequest,
@@ -325,16 +346,18 @@ impl Contract {
             }
         }
 
-        let paymaster = foreign_chain_configuration
-            .next_paymaster()
+        let mut paymaster = foreign_chain_configuration
+            .next_paymaster_notmut()
             .expect_or_reject("No paymasters found");
 
-        let sender_foreign_address = get_mpc_address(
-            self.signer_contract_public_key.clone().expect_or_reject("The signer contract public key must be refreshed by calling `refresh_signer_public_key`"),
-            &env::current_account_id(),
-            sender.as_str(),
-        )
-        .expect_or_reject("Failed to calculate MPC address");
+        let sender_public_key = self
+            .user_keys
+            .get(&sender)
+            .expect_or_reject("No managed keys for sender")
+            .get(&key_path)
+            .expect_or_reject("Sender is unauthorized for the requested key path");
+
+        let sender_foreign_address = ForeignAddress::from_raw_public_key(sender_public_key);
 
         let chain_id = transaction_request.chain_id;
 
@@ -355,9 +378,13 @@ impl Contract {
             .expect_or_reject("Paymaster does not have enough funds")
             .0;
 
+        foreign_chain_configuration
+            .paymasters
+            .insert(&paymaster.key_path, &paymaster);
+
         let signature_requests = vec![
             SignatureRequest::new(&paymaster.key_path, paymaster_transaction, true),
-            SignatureRequest::new(&sender, transaction_request.clone(), false),
+            SignatureRequest::new(&key_path, transaction_request.clone(), false),
         ];
 
         let pending_transaction_sequence = PendingTransactionSequence {
@@ -424,8 +451,12 @@ impl Contract {
         };
 
         #[allow(clippy::cast_possible_truncation)]
-        ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
-            .sign(payload, &next_signature_request.key_path)
+        ext_chain_key_sign::ext(self.signer_contract_id.clone()) // TODO: Gas.
+            .ck_sign_hash(
+                next_signature_request.key_path.clone(),
+                payload.to_vec(),
+                None,
+            )
             .then(Self::ext(env::current_account_id()).sign_next_callback(id.into(), index as u32))
     }
 
@@ -434,7 +465,7 @@ impl Contract {
         &mut self,
         id: U64,
         index: u32,
-        #[callback_result] result: Result<MpcSignature, PromiseError>,
+        #[callback_result] result: Result<String, PromiseError>,
     ) -> String {
         let id = id.0;
 
@@ -464,7 +495,7 @@ impl Contract {
         let signature = result
             .ok()
             .expect_or_reject("Failed to produce signature")
-            .try_into()
+            .parse()
             .unwrap_or_reject();
 
         let transaction: TypedTransaction = request.transaction.clone().into();

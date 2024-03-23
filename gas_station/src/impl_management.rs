@@ -1,12 +1,8 @@
-use std::str::FromStr;
-
 use ethers_core::types::U256;
 use near_sdk::{
-    env,
+    collections::TreeMap,
     json_types::{U128, U64},
-    near_bindgen, require,
-    store::Vector,
-    AccountId, Promise, PromiseError, PromiseOrValue,
+    near_bindgen, require, AccountId, Promise, PromiseOrValue,
 };
 use near_sdk_contract_tools::owner::{Owner, OwnerExternal};
 
@@ -17,10 +13,7 @@ use crate::{
     valid_transaction_request::ValidTransactionRequest,
     Contract, ContractExt, Flags, GetForeignChain, PendingTransactionSequence, StorageKey,
 };
-use lib::{
-    asset::AssetId, foreign_address::ForeignAddress, kdf::get_mpc_address, oracle::PriceData,
-    signer::ext_signer, Rejectable,
-};
+use lib::{asset::AssetId, foreign_address::ForeignAddress, oracle::PriceData, Rejectable};
 
 #[allow(clippy::needless_pass_by_value)]
 #[near_bindgen]
@@ -44,52 +37,52 @@ impl Contract {
     pub fn set_signer_contract_id(
         &mut self,
         account_id: AccountId,
-        refresh: Option<bool>,
+        // refresh: Option<bool>,
     ) -> PromiseOrValue<()> {
         self.assert_owner();
 
         if self.signer_contract_id != account_id {
             self.signer_contract_id = account_id;
-            self.signer_contract_public_key = None;
+            // self.signer_contract_public_key = None;
 
-            if refresh.unwrap_or(true) {
-                return PromiseOrValue::Promise(
-                    ext_signer::ext(self.signer_contract_id.clone())
-                        .public_key()
-                        .then(
-                            Self::ext(env::current_account_id())
-                                .refresh_signer_public_key_callback(),
-                        ),
-                );
-            }
+            // if refresh.unwrap_or(true) {
+            //     return PromiseOrValue::Promise(
+            //         ext_signer::ext(self.signer_contract_id.clone())
+            //             .public_key()
+            //             .then(
+            //                 Self::ext(env::current_account_id())
+            //                     .refresh_signer_public_key_callback(),
+            //             ),
+            //     );
+            // }
         }
 
         PromiseOrValue::Value(())
     }
 
-    /// Refresh the public key from the signer contract.
-    pub fn refresh_signer_public_key(&mut self) -> Promise {
-        self.assert_owner();
+    // /// Refresh the public key from the signer contract.
+    // pub fn refresh_signer_public_key(&mut self) -> Promise {
+    //     self.assert_owner();
 
-        ext_signer::ext(self.signer_contract_id.clone())
-            .public_key()
-            .then(Self::ext(env::current_account_id()).refresh_signer_public_key_callback())
-    }
+    //     ext_signer::ext(self.signer_contract_id.clone())
+    //         .public_key()
+    //         .then(Self::ext(env::current_account_id()).refresh_signer_public_key_callback())
+    // }
 
-    #[private]
-    pub fn refresh_signer_public_key_callback(
-        &mut self,
-        #[callback_result] public_key: Result<near_sdk::PublicKey, PromiseError>,
-    ) {
-        let public_key = public_key
-            .ok()
-            .expect_or_reject("Failed to load signer public key from the signer contract");
-        self.signer_contract_public_key = Some(public_key);
-    }
+    // #[private]
+    // pub fn refresh_signer_public_key_callback(
+    //     &mut self,
+    //     #[callback_result] public_key: Result<near_sdk::PublicKey, PromiseError>,
+    // ) {
+    //     let public_key = public_key
+    //         .ok()
+    //         .expect_or_reject("Failed to load signer public key from the signer contract");
+    //     self.signer_contract_public_key = Some(public_key);
+    // }
 
-    pub fn get_signer_public_key(&self) -> Option<&near_sdk::PublicKey> {
-        self.signer_contract_public_key.as_ref()
-    }
+    // pub fn get_signer_public_key(&self) -> Option<&near_sdk::PublicKey> {
+    //     self.signer_contract_public_key.as_ref()
+    // }
 
     pub fn get_flags(&self) -> &Flags {
         &self.flags
@@ -158,11 +151,11 @@ impl Contract {
         self.foreign_chains.insert(
             chain_id.0,
             ChainConfiguration {
-                next_paymaster: 0,
+                next_paymaster: String::new(),
                 oracle_asset_id,
                 transfer_gas: U256::from(transfer_gas.0).0,
                 fee_rate: (fee_rate.0.into(), fee_rate.1.into()),
-                paymasters: Vector::new(StorageKey::Paymasters(chain_id.0)),
+                paymasters: TreeMap::new(StorageKey::Paymasters(chain_id.0)),
             },
         );
     }
@@ -204,71 +197,64 @@ impl Contract {
         nonce: u32,
         key_path: String,
         balance: Option<near_sdk::json_types::U128>,
-    ) -> u32 {
+    ) {
         self.assert_owner();
 
         require!(
-            AccountId::from_str(&key_path).is_err(),
-            "Paymaster key path must not be a valid account id",
+            self.paymaster_keys.contains_key(&key_path),
+            "Key path not registered as paymaster",
         );
 
         let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
 
-        let index = chain.paymasters.len();
-
-        chain.paymasters.push(PaymasterConfiguration {
-            nonce,
-            key_path,
-            minimum_available_balance: U256::from(balance.map_or(0, |v| v.0)).0,
-        });
-
-        index
+        chain.paymasters.insert(
+            &key_path,
+            &PaymasterConfiguration {
+                nonce,
+                key_path: key_path.clone(),
+                minimum_available_balance: U256::from(balance.map_or(0, |v| v.0)).0,
+            },
+        );
     }
 
-    pub fn set_paymaster_balance(&mut self, chain_id: U64, index: u32, balance: U128) {
+    pub fn set_paymaster_balance(&mut self, chain_id: U64, key_path: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
         self.assert_owner();
 
         let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-        let paymaster = chain.get_paymaster_mut(index).unwrap_or_reject();
-
+        let mut paymaster = chain.paymasters.get(&key_path).unwrap_or_reject();
         paymaster.minimum_available_balance = U256::from(balance.0).0;
+        chain.paymasters.insert(&key_path, &paymaster);
     }
 
-    pub fn increase_paymaster_balance(&mut self, chain_id: U64, index: u32, balance: U128) {
+    pub fn increase_paymaster_balance(&mut self, chain_id: U64, key_path: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
         self.assert_owner();
 
         let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-        let paymaster = chain.get_paymaster_mut(index).unwrap_or_reject();
-
+        let mut paymaster = chain.paymasters.get(&key_path).unwrap_or_reject();
         paymaster.minimum_available_balance =
             (U256(paymaster.minimum_available_balance) + U256::from(balance.0)).0;
+        chain.paymasters.insert(&key_path, &paymaster);
     }
 
-    pub fn set_paymaster_nonce(&mut self, chain_id: U64, index: u32, nonce: u32) {
+    pub fn set_paymaster_nonce(&mut self, chain_id: U64, key_path: String, nonce: u32) {
         #[cfg(not(feature = "debug"))]
         self.assert_owner();
 
         let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-        let paymaster = chain.get_paymaster_mut(index).unwrap_or_reject();
-
+        let mut paymaster = chain.paymasters.get(&key_path).unwrap_or_reject();
         paymaster.nonce = nonce;
+        chain.paymasters.insert(&key_path, &paymaster);
     }
 
     /// Note: If a transaction sequence is _already_ pending signatures with
     /// the paymaster getting removed, this method will not prevent those
     /// payloads from getting signed.
-    pub fn remove_paymaster(&mut self, chain_id: U64, index: u32) {
+    pub fn remove_paymaster(&mut self, chain_id: U64, key_path: String) {
         self.assert_owner();
         let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-
-        if index < chain.paymasters.len() {
-            chain.paymasters.swap_remove(index);
-            // resetting chain.next_paymaster is not necessary, since overflow is handled in [`ForeignChainConfiguration::next_paymaster`] function.
-        } else {
-            env::panic_str("Invalid index");
-        }
+        chain.paymasters.remove(&key_path).unwrap_or_reject();
     }
 
     pub fn get_paymasters(&self, chain_id: U64) -> Vec<ViewPaymasterConfiguration> {
@@ -276,15 +262,12 @@ impl Contract {
             .unwrap_or_reject()
             .paymasters
             .iter()
-            .map(|p| ViewPaymasterConfiguration {
+            .map(|(_, p)| ViewPaymasterConfiguration {
                 nonce: p.nonce,
                 key_path: p.key_path.clone(),
-                foreign_address: get_mpc_address(
-                    self.signer_contract_public_key.clone().unwrap(),
-                    &env::current_account_id(),
-                    &p.key_path,
-                )
-                .unwrap(),
+                foreign_address: ForeignAddress::from_raw_public_key(
+                    self.paymaster_keys.get(&p.key_path).unwrap_or_reject(),
+                ),
                 minimum_available_balance: U256(p.minimum_available_balance).as_u128().into(),
             })
             .collect()
@@ -361,13 +344,18 @@ impl Contract {
         self.collected_fees.iter().collect()
     }
 
-    pub fn get_foreign_address_for(&self, account_id: AccountId) -> ForeignAddress {
-        get_mpc_address(
-            self.signer_contract_public_key.clone().unwrap(),
-            &env::current_account_id(),
-            account_id.as_str(),
+    pub fn get_foreign_address_for(
+        &self,
+        account_id: AccountId,
+        key_path: String,
+    ) -> ForeignAddress {
+        ForeignAddress::from_raw_public_key(
+            self.user_keys
+                .get(&account_id)
+                .unwrap_or_reject()
+                .get(&key_path)
+                .unwrap_or_reject(),
         )
-        .unwrap()
     }
 
     pub fn estimate_gas_cost(

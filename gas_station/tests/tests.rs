@@ -9,7 +9,8 @@ use gas_station::{
     Nep141ReceiverCreateTransactionArgs, TransactionSequenceCreation,
 };
 use lib::{
-    asset::AssetId, foreign_address::ForeignAddress, kdf::get_mpc_address, signer::MpcSignature,
+    asset::AssetId, foreign_address::ForeignAddress, kdf::get_mpc_address, nft_key::NftKeyMinted,
+    signer::MpcSignature,
 };
 use near_sdk::{serde::Deserialize, serde_json::json};
 use near_workspaces::{
@@ -21,7 +22,7 @@ use near_workspaces::{
 async fn test_workflow_happy_path() {
     let w = near_workspaces::sandbox().await.unwrap();
 
-    let (gas_station, oracle, signer, local_ft, alice) = tokio::join!(
+    let (gas_station, oracle, signer, nft_key, local_ft, alice) = tokio::join!(
         async {
             let wasm = near_workspaces::compile_project("./").await.unwrap();
             w.dev_deploy(&wasm).await.unwrap()
@@ -34,6 +35,12 @@ async fn test_workflow_happy_path() {
         },
         async {
             let wasm = near_workspaces::compile_project("../mock/signer")
+                .await
+                .unwrap();
+            w.dev_deploy(&wasm).await.unwrap()
+        },
+        async {
+            let wasm = near_workspaces::compile_project("../nft_key")
                 .await
                 .unwrap();
             w.dev_deploy(&wasm).await.unwrap()
@@ -57,38 +64,138 @@ async fn test_workflow_happy_path() {
     println!("{:<16} {}", "Gas Station:", gas_station.id());
     println!("{:<16} {}", "Oracle:", oracle.id());
     println!("{:<16} {}", "Signer:", signer.id());
+    println!("{:<16} {}", "NFT Key:", nft_key.id());
     println!("{:<16} {}", "Local FT:", local_ft.id());
     println!("{:<16} {}", "Alice:", alice.id());
 
-    println!("Initializing the contract...");
+    println!("Initializing the contracts...");
 
-    gas_station
-        .batch()
-        .call(Function::new("new").args_json(json!({
+    println!("Initializing NFT key contract...");
+    nft_key
+        .call("new")
+        .args_json(json!({
             "signer_contract_id": signer.id(),
+        }))
+        .max_gas()
+        .transact()
+        .await
+        .unwrap()
+        .unwrap();
+
+    println!("Initializing gas station contract with Alice as owner...");
+    alice
+        .batch(gas_station.id())
+        .call(Function::new("new").args_json(json!({
+            "signer_contract_id": nft_key.id(),
             "oracle_id": oracle.id(),
             "supported_assets_oracle_asset_ids": [
                 [AssetId::Native, "wrap.testnet"],
                 [AssetId::Nep141(local_ft.id().as_str().parse().unwrap()), "local_ft.testnet"],
             ],
         })))
-        .call(
-            Function::new("refresh_signer_public_key")
-                .args_json(json!({}))
-                .gas(Gas::from_tgas(50)),
-        )
         .call(Function::new("add_foreign_chain").args_json(json!({
             "chain_id": "0",
             "oracle_asset_id": "weth.fakes.testnet",
             "transfer_gas": "21000",
             "fee_rate": ["120", "100"],
         })))
-        .call(Function::new("add_paymaster").args_json(json!({
+        .transact()
+        .await
+        .unwrap()
+        .unwrap();
+
+    println!("Performing storage deposits...");
+    tokio::join!(
+        async {
+            alice
+                .call(nft_key.id(), "storage_deposit")
+                .args_json(json!({}))
+                .deposit(NearToken::from_near(1))
+                .transact()
+                .await
+                .unwrap()
+                .unwrap();
+        },
+        async {
+            alice
+                .call(nft_key.id(), "storage_deposit")
+                .args_json(json!({
+                    "account_id": gas_station.id(),
+                }))
+                .deposit(NearToken::from_near(1))
+                .transact()
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    );
+
+    println!("Generating paymaster NFT key...");
+    let paymaster_key = alice
+        .call(nft_key.id(), "mint")
+        .max_gas()
+        .transact()
+        .await
+        .unwrap()
+        .json::<NftKeyMinted>()
+        .unwrap()
+        .key_path;
+
+    println!("Paymaster key: {paymaster_key}");
+
+    println!("Transferring paymaster NFT key to gas station...");
+    alice
+        .call(nft_key.id(), "nft_transfer_call")
+        .args_json(json!({
+            "receiver_id": gas_station.id(),
+            "token_id": paymaster_key,
+            "msg": near_sdk::serde_json::to_string(&gas_station::Nep171ReceiverMsg {
+                is_paymaster: true,
+            }).unwrap(),
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .max_gas()
+        .transact()
+        .await
+        .unwrap()
+        .unwrap();
+
+    println!("Adding paymaster...");
+    alice
+        .call(gas_station.id(), "add_paymaster")
+        .args_json(json!({
             "chain_id": "0",
             "balance": "100000000",
             "nonce": 0,
-            "key_path": "$",
-        })))
+            "key_path": paymaster_key,
+        }))
+        .transact()
+        .await
+        .unwrap()
+        .unwrap();
+
+    println!("Generating Alice's NFT key...");
+    let alice_key = alice
+        .call(nft_key.id(), "mint")
+        .max_gas()
+        .transact()
+        .await
+        .unwrap()
+        .json::<NftKeyMinted>()
+        .unwrap()
+        .key_path;
+    println!("Alice's NFT key: {alice_key}");
+
+    println!("Transferring Alice's NFT key to gas station...");
+    alice
+        .call(nft_key.id(), "nft_transfer_call")
+        .args_json(json!({
+            "receiver_id": gas_station.id(),
+            "token_id": alice_key,
+            "msg": "",
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .max_gas()
         .transact()
         .await
         .unwrap()
@@ -96,6 +203,7 @@ async fn test_workflow_happy_path() {
 
     println!("Initialization complete.");
 
+    println!("Checking paymaster configuration...");
     let result = gas_station
         .view("get_paymasters")
         .args_json(json!({
@@ -113,7 +221,8 @@ async fn test_workflow_happy_path() {
         result.minimum_available_balance,
         near_sdk::json_types::U128(100000000),
     );
-    assert_eq!(result.key_path, "$".to_string());
+    assert_eq!(result.key_path, paymaster_key);
+    println!("Paymaster configuration check complete.");
 
     let eth_transaction = ethers_core::types::transaction::eip1559::Eip1559TransactionRequest {
         chain_id: Some(0.into()),
@@ -146,6 +255,7 @@ async fn test_workflow_happy_path() {
             "receiver_id": gas_station.id(),
             "amount": near_sdk::json_types::U128(NearToken::from_near(1).as_yoctonear()),
             "msg": near_sdk::serde_json::to_string(&Nep141ReceiverCreateTransactionArgs {
+                key_path: alice_key.clone(),
                 transaction_rlp_hex: hex::encode_prefixed(&eth_transaction.rlp()),
                 use_paymaster: Some(true),
             }).unwrap(),
@@ -187,6 +297,7 @@ async fn test_workflow_happy_path() {
     let tx = alice
         .call(gas_station.id(), "create_transaction")
         .args_json(json!({
+            "key_path": alice_key,
             "transaction_rlp_hex": hex::encode_prefixed(&eth_transaction.rlp()),
             "use_paymaster": true,
         }))
@@ -240,6 +351,7 @@ async fn test_workflow_happy_path() {
         .view("get_foreign_address_for")
         .args_json(json!({
             "account_id": alice.id(),
+            "key_path": alice_key,
         }))
         .await
         .unwrap()

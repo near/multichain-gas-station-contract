@@ -36,13 +36,14 @@ impl Contract {
         let mut contract = Self {
             next_unique_id: 0,
             signer_contract_id,
-            signer_contract_public_key: None, // Loaded asynchronously
             oracle_id,
             supported_assets_oracle_asset_ids: UnorderedMap::new(StorageKey::SupportedAssets),
             flags: Flags::default(),
             expire_sequence_after_blocks: expire_sequence_after_blocks
                 .map_or(DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS, u64::from),
             foreign_chains: UnorderedMap::new(StorageKey::ForeignChains),
+            user_keys: UnorderedMap::new(StorageKey::ManagedKeys),
+            paymaster_keys: UnorderedMap::new(StorageKey::PaymasterKeys),
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
             pending_transaction_sequences: UnorderedMap::new(

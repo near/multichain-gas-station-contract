@@ -2,12 +2,12 @@ use ethers_core::types::U256;
 use lib::{
     foreign_address::ForeignAddress,
     oracle::{process_oracle_result, PriceData},
+    Rejectable,
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     json_types::U128,
     serde::{Deserialize, Serialize},
-    store::Vector,
 };
 use schemars::JsonSchema;
 use thiserror::Error;
@@ -36,6 +36,13 @@ impl PaymasterConfiguration {
         self.nonce += 1;
         nonce
     }
+
+    pub fn deduct(&mut self, request_tokens_for_gas: U256) {
+        self.minimum_available_balance = U256(self.minimum_available_balance)
+            .checked_sub(request_tokens_for_gas)
+            .expect_or_reject("Paymaster does not have enough funds")
+            .0;
+    }
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
@@ -49,8 +56,8 @@ pub struct ViewPaymasterConfiguration {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub struct ChainConfiguration {
-    pub paymasters: Vector<PaymasterConfiguration>,
-    pub next_paymaster: u32,
+    pub paymasters: near_sdk::collections::TreeMap<String, PaymasterConfiguration>,
+    pub next_paymaster: String,
     pub transfer_gas: [u64; 4],
     pub fee_rate: (u128, u128),
     pub oracle_asset_id: String,
@@ -65,20 +72,17 @@ impl ChainConfiguration {
         U256(self.transfer_gas)
     }
 
-    pub fn get_paymaster_mut(
-        &mut self,
-        index: u32,
-    ) -> Result<&mut PaymasterConfiguration, PaymasterDoesNotExistError> {
-        self.paymasters
-            .get_mut(index)
-            .ok_or(PaymasterDoesNotExistError(index))
-    }
-
-    pub fn next_paymaster(&mut self) -> Option<&mut PaymasterConfiguration> {
-        let next_paymaster = self.next_paymaster % self.paymasters.len(); // so that each individual paymaster removal doesn't end up resetting to 0 all the time
-        self.next_paymaster = (self.next_paymaster + 1) % self.paymasters.len();
-        let paymaster = self.paymasters.get_mut(next_paymaster);
-        paymaster
+    pub fn next_paymaster_notmut(&mut self) -> Option<PaymasterConfiguration> {
+        let paymaster_key = self
+            .paymasters
+            .ceil_key(&self.next_paymaster)
+            .or_else(|| self.paymasters.min())?;
+        let next_paymaster_key = self
+            .paymasters
+            .higher(&paymaster_key)
+            .or_else(|| self.paymasters.min())?;
+        self.next_paymaster = next_paymaster_key;
+        self.paymasters.get(&paymaster_key)
     }
 
     pub fn foreign_token_price(

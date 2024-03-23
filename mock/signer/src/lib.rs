@@ -5,7 +5,7 @@ use lib::{
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    env, near_bindgen, require, PromiseOrValue, PublicKey,
+    env, near_bindgen, require, AccountId, PromiseOrValue, PublicKey,
 };
 
 pub fn construct_spoof_key(
@@ -18,10 +18,20 @@ pub fn construct_spoof_key(
 
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug)]
 #[near_bindgen]
-struct Contract {}
+pub struct MockSignerContract {}
 
 #[near_bindgen]
-impl SignerInterface for Contract {
+impl MockSignerContract {
+    pub fn public_key_for(&self, account_id: AccountId, path: String) -> String {
+        let signing_key = construct_spoof_key(account_id.as_bytes(), path.as_bytes());
+        let verifying_key = signing_key.verifying_key();
+        let encoded = verifying_key.to_encoded_point(false);
+        encoded.to_string()
+    }
+}
+
+#[near_bindgen]
+impl SignerInterface for MockSignerContract {
     fn sign(&mut self, payload: [u8; 32], path: &String) -> PromiseOrValue<MpcSignature> {
         let predecessor = env::predecessor_account_id();
         let signing_key = construct_spoof_key(predecessor.as_bytes(), path.as_bytes());
@@ -37,7 +47,7 @@ impl SignerInterface for Contract {
 }
 
 #[near_bindgen]
-impl ChainKeySign for Contract {
+impl ChainKeySign for MockSignerContract {
     fn ck_scheme_oid(&self) -> String {
         "1.3.132.0.10".to_string()
     }

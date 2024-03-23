@@ -3,13 +3,15 @@ use lib::{
         ext_chain_key_approved, ext_chain_key_sign, ChainKeyApproval, ChainKeySign,
         ChainKeySignature,
     },
+    nft_key::{NftKeyExtraMetadata, NftKeyMinted},
     Rejectable,
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     env, near_bindgen, require,
+    serde_json::{self, json},
     store::UnorderedMap,
-    AccountId, BorshStorageKey, PanicOnDefault, PromiseOrValue,
+    AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
 use near_sdk_contract_tools::hook::Hook;
 #[allow(clippy::wildcard_imports)]
@@ -21,8 +23,8 @@ enum StorageKey {
     ApprovalsFor(u32),
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Debug, PanicOnDefault, Nep171)]
-#[nep171(transfer_hook = "Self", burn_hook = "Self")]
+#[derive(BorshSerialize, BorshDeserialize, Debug, PanicOnDefault, NonFungibleToken)]
+#[non_fungible_token(transfer_hook = "Self", burn_hook = "Self")]
 #[near_bindgen]
 pub struct NftKeyContract {
     pub next_id: u32,
@@ -34,11 +36,19 @@ pub struct NftKeyContract {
 impl NftKeyContract {
     #[init]
     pub fn new(signer_contract_id: AccountId) -> Self {
-        Self {
+        let mut contract = Self {
             next_id: 0,
             signer_contract_id,
             approvals: UnorderedMap::new(StorageKey::Approvals),
-        }
+        };
+
+        contract.set_contract_metadata(ContractMetadata::new(
+            "Chain Key".to_string(),
+            "CK".to_string(),
+            None,
+        ));
+
+        contract
     }
 
     fn generate_id(&mut self) -> u32 {
@@ -47,20 +57,50 @@ impl NftKeyContract {
         id
     }
 
-    pub fn mint(&mut self) -> String {
+    pub fn mint(&mut self) -> Promise {
         let id = self.generate_id().to_string();
+        let predecessor = env::predecessor_account_id();
 
-        Nep171Controller::mint(
-            self,
-            &Nep171Mint {
-                token_ids: std::array::from_ref(&id),
-                receiver_id: &env::predecessor_account_id(),
-                memo: None,
-            },
+        Promise::new(self.signer_contract_id.clone())
+            .function_call(
+                "public_key_for".to_string(),
+                serde_json::to_vec(&json!({
+                    "account_id": env::current_account_id(),
+                    "path": id,
+                }))
+                .unwrap_or_reject(),
+                0,
+                env::prepaid_gas() / 10,
+            )
+            .then(Self::ext(env::current_account_id()).mint_callback(predecessor, id))
+    }
+
+    #[private]
+    pub fn mint_callback(
+        &mut self,
+        #[serializer(borsh)] receiver_id: AccountId,
+        #[serializer(borsh)] id: String,
+        #[callback_result] result: Result<String, PromiseError>,
+    ) -> NftKeyMinted {
+        let public_key = result.unwrap();
+
+        let metadata = NftKeyExtraMetadata {
+            public_key: public_key.clone(),
+        };
+
+        self.mint_with_metadata(
+            id.clone(),
+            receiver_id,
+            TokenMetadata::new()
+                .title(format!("Chain Key #{id}"))
+                .extra(serde_json::to_string(&metadata).unwrap_or_reject()),
         )
-        .expect_or_reject("Failed to mint new key token");
+        .unwrap_or_reject();
 
-        id
+        NftKeyMinted {
+            key_path: id,
+            public_key,
+        }
     }
 }
 

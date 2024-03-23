@@ -6,6 +6,7 @@ pub mod asset;
 pub mod chain_key;
 pub mod foreign_address;
 pub mod kdf;
+pub mod nft_key;
 pub mod oracle;
 pub mod signer;
 

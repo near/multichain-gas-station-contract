@@ -22,6 +22,8 @@ pub trait ChainKeySign {
     //     payload: Vec<u8>,
     //     digest: String, // TODO: Is this necessary? It seems like Ethereum uses secp256k1/keccak256 whereas everyone else uses secp256k1/sha256.
     // ) -> PromiseOrValue<ChainKeySignature>;
+
+    // TODO: functions that: verify signature, derive public key?
 }
 
 #[ext_contract(ext_chain_key_approval)]

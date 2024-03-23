@@ -13,9 +13,13 @@ async fn test_nft_key() {
                 .unwrap()
         },
         async {
-            w.dev_deploy(&near_workspaces::compile_project("../mock/signer").await.unwrap())
-                .await
-                .unwrap()
+            w.dev_deploy(
+                &near_workspaces::compile_project("../mock/signer")
+                    .await
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
         },
         async { w.dev_create_account().await.unwrap() },
         async { w.dev_create_account().await.unwrap() },
