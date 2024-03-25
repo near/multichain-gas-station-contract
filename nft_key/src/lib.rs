@@ -1,9 +1,7 @@
 use lib::{
-    chain_key::{
-        ext_chain_key_approved, ext_chain_key_sign, ChainKeyApproval, ChainKeySign,
-        ChainKeySignature,
-    },
+    chain_key::{ext_chain_key_approved, ChainKeyApproval, ChainKeySign, ChainKeySignature},
     nft_key::{NftKeyExtraMetadata, NftKeyMinted},
+    signer::{ext_signer, MpcSignature},
     Rejectable,
 };
 use near_sdk::{
@@ -129,13 +127,55 @@ impl ChainKeySign for NftKeyContract {
         );
 
         PromiseOrValue::Promise(
-            ext_chain_key_sign::ext(self.signer_contract_id.clone())
-                .ck_sign_hash(path, payload, None),
+            ext_signer::ext(self.signer_contract_id.clone())
+                .with_unused_gas_weight(10)
+                .sign(payload.try_into().unwrap(), &path, 0)
+                .then(
+                    Self::ext(env::current_account_id())
+                        .with_static_gas(near_sdk::Gas::ONE_TERA * 3)
+                        .with_unused_gas_weight(1)
+                        .ck_sign_hash_callback(),
+                ),
         )
     }
 
     fn ck_scheme_oid(&self) -> String {
         "1.3.132.0.10".to_string()
+    }
+}
+
+#[near_bindgen]
+impl NftKeyContract {
+    #[private]
+    pub fn ck_sign_hash_callback(
+        &self,
+        #[callback_result] result: Result<MpcSignature, PromiseError>,
+    ) -> ChainKeySignature {
+        let mpc_signature = result.unwrap();
+        let ethers_signature: ethers_core::types::Signature =
+            mpc_signature.try_into().unwrap_or_reject();
+        ethers_signature.to_string()
+    }
+
+    #[private]
+    pub fn ck_approve_callback(
+        &mut self,
+        #[serializer(borsh)] token_id: u32,
+        #[serializer(borsh)] account_id: AccountId,
+        #[serializer(borsh)] approval_id: u32,
+        #[callback_result] result: Result<(), PromiseError>,
+    ) -> Option<u32> {
+        if result.is_ok() {
+            Some(approval_id)
+        } else {
+            let ejected_id = self
+                .approvals
+                .get_mut(&token_id)
+                .unwrap_or_reject()
+                .remove(&account_id);
+            require!(ejected_id == Some(approval_id), "Inconsistent approval ID");
+            None
+        }
     }
 }
 
@@ -146,7 +186,7 @@ impl ChainKeyApproval for NftKeyContract {
         path: String,
         account_id: AccountId,
         msg: Option<String>,
-    ) -> PromiseOrValue<()> {
+    ) -> PromiseOrValue<Option<u32>> {
         let id: u32 = path.parse().expect_or_reject("Invalid token ID");
         let actual_owner = Nep171Controller::token_owner(self, &path);
         let predecessor = env::predecessor_account_id();
@@ -162,7 +202,7 @@ impl ChainKeyApproval for NftKeyContract {
             .or_insert_with(|| UnorderedMap::new(StorageKey::ApprovalsFor(id)))
             .insert(account_id.clone(), approval_id);
 
-        msg.map_or(PromiseOrValue::Value(()), |msg| {
+        msg.map_or(PromiseOrValue::Value(Some(approval_id)), |msg| {
             PromiseOrValue::Promise(ext_chain_key_approved::ext(account_id).ck_on_approved(
                 predecessor,
                 path,

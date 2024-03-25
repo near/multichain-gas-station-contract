@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+ethers-core.workspace = true
 lib = { path = "../lib" }
 near-sdk.workspace = true
 near-sdk-contract-tools.workspace = true

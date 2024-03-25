@@ -1,3 +1,4 @@
+use lib::nft_key::NftKeyMinted;
 use near_sdk::serde_json::json;
 use near_sdk_contract_tools::nft::Token;
 use near_workspaces::types::NearToken;
@@ -44,22 +45,52 @@ async fn test_nft_key() {
 
     println!("Initialization complete.");
 
+    println!("Registering for storage...");
+
+    tokio::join!(
+        async {
+            alice
+                .call(nft_key.id(), "storage_deposit")
+                .args_json(json!({}))
+                .deposit(NearToken::from_near(1))
+                .transact()
+                .await
+                .unwrap()
+                .unwrap();
+        },
+        async {
+            bob.call(nft_key.id(), "storage_deposit")
+                .args_json(json!({}))
+                .deposit(NearToken::from_near(1))
+                .transact()
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    );
+
+    println!("Finished registering for storage.");
+
     let token_1_id = alice
         .call(nft_key.id(), "mint")
         .args_json(json!({}))
+        .max_gas()
         .transact()
         .await
         .unwrap()
-        .json::<String>()
-        .unwrap();
+        .json::<NftKeyMinted>()
+        .unwrap()
+        .key_path;
     let token_2_id = alice
         .call(nft_key.id(), "mint")
         .args_json(json!({}))
+        .max_gas()
         .transact()
         .await
         .unwrap()
-        .json::<String>()
-        .unwrap();
+        .json::<NftKeyMinted>()
+        .unwrap()
+        .key_path;
 
     let msg_1 = [1u8; 32];
     let msg_2 = [2u8; 32];
@@ -158,7 +189,7 @@ async fn test_nft_key() {
 
     println!("Approving Bob to sign with token {token_1_id} without transferring...");
 
-    alice
+    let approval_id = alice
         .call(nft_key.id(), "ck_approve")
         .args_json(json!({
             "path": token_1_id,
@@ -168,23 +199,31 @@ async fn test_nft_key() {
         .transact()
         .await
         .unwrap()
+        .json::<Option<u32>>()
+        .unwrap()
         .unwrap();
 
     println!("Approval succeeded.");
     println!("Bob attempting to sign with token {token_1_id}...");
 
-    let bob_is_approved = bob
+    let bob_approved_transaction = bob
         .call(nft_key.id(), "ck_sign_hash")
         .args_json(json!({
             "path": token_1_id,
             "payload": msg_1,
+            "approval_id": approval_id,
         }))
         .max_gas()
         .transact()
         .await
-        .unwrap()
-        .json::<String>()
         .unwrap();
+
+    for outcome in bob_approved_transaction.outcomes() {
+        println!("outcome executor: {}", outcome.executor_id);
+        println!("\toutcome gas: {:?}", outcome.gas_burnt);
+    }
+
+    let bob_is_approved = bob_approved_transaction.json::<String>().unwrap();
 
     println!("After approval, Bob signed: {bob_is_approved}");
 

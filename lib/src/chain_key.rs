@@ -33,7 +33,7 @@ pub trait ChainKeyApproval {
         path: String,
         account_id: AccountId,
         msg: Option<String>,
-    ) -> PromiseOrValue<()>;
+    ) -> PromiseOrValue<Option<u32>>;
     fn ck_revoke(
         &mut self,
         path: String,

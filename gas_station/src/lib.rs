@@ -457,7 +457,12 @@ impl Contract {
                 payload.to_vec(),
                 None,
             )
-            .then(Self::ext(env::current_account_id()).sign_next_callback(id.into(), index as u32))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(near_sdk::Gas::ONE_TERA * 3)
+                    .with_unused_gas_weight(0)
+                    .sign_next_callback(id.into(), index as u32),
+            )
     }
 
     #[private]
