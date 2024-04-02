@@ -1,4 +1,3 @@
-use lib::nft_key::NftKeyMinted;
 use near_sdk::serde_json::json;
 use near_sdk_contract_tools::nft::Token;
 use near_workspaces::types::NearToken;
@@ -78,9 +77,9 @@ async fn test_nft_key() {
         .transact()
         .await
         .unwrap()
-        .json::<NftKeyMinted>()
+        .json::<u32>()
         .unwrap()
-        .key_path;
+        .to_string();
     let token_2_id = alice
         .call(nft_key.id(), "mint")
         .args_json(json!({}))
@@ -88,9 +87,9 @@ async fn test_nft_key() {
         .transact()
         .await
         .unwrap()
-        .json::<NftKeyMinted>()
+        .json::<u32>()
         .unwrap()
-        .key_path;
+        .to_string();
 
     let msg_1 = [1u8; 32];
     let msg_2 = [2u8; 32];
@@ -98,9 +97,9 @@ async fn test_nft_key() {
     let (alice_success, bob_fail) = tokio::join!(
         async {
             alice
-                .call(nft_key.id(), "ck_sign_hash")
+                .call(nft_key.id(), "ckt_sign_hash")
                 .args_json(json!({
-                    "path": token_1_id,
+                    "token_id": token_1_id,
                     "payload": msg_1,
                 }))
                 .max_gas()
@@ -111,9 +110,9 @@ async fn test_nft_key() {
                 .unwrap()
         },
         async {
-            bob.call(nft_key.id(), "ck_sign_hash")
+            bob.call(nft_key.id(), "ckt_sign_hash")
                 .args_json(json!({
-                    "path": token_2_id,
+                    "token_id": token_2_id,
                     "payload": msg_2,
                 }))
                 .max_gas()
@@ -173,9 +172,9 @@ async fn test_nft_key() {
     println!("Bob attempting to sign with token {token_2_id}...");
 
     let bob_success = bob
-        .call(nft_key.id(), "ck_sign_hash")
+        .call(nft_key.id(), "ckt_sign_hash")
         .args_json(json!({
-            "path": token_2_id,
+            "token_id": token_2_id,
             "payload": msg_2,
         }))
         .max_gas()
@@ -190,9 +189,9 @@ async fn test_nft_key() {
     println!("Approving Bob to sign with token {token_1_id} without transferring...");
 
     let approval_id = alice
-        .call(nft_key.id(), "ck_approve")
+        .call(nft_key.id(), "ckt_approve")
         .args_json(json!({
-            "path": token_1_id,
+            "token_id": token_1_id,
             "account_id": bob.id(),
         }))
         .max_gas()
@@ -207,9 +206,9 @@ async fn test_nft_key() {
     println!("Bob attempting to sign with token {token_1_id}...");
 
     let bob_approved_transaction = bob
-        .call(nft_key.id(), "ck_sign_hash")
+        .call(nft_key.id(), "ckt_sign_hash")
         .args_json(json!({
-            "path": token_1_id,
+            "token_id": token_1_id,
             "payload": msg_1,
             "approval_id": approval_id,
         }))
@@ -230,9 +229,9 @@ async fn test_nft_key() {
     println!("Revoking Bob's approval to sign with token {token_1_id}...");
 
     alice
-        .call(nft_key.id(), "ck_revoke")
+        .call(nft_key.id(), "ckt_revoke")
         .args_json(json!({
-            "path": token_1_id,
+            "token_id": token_1_id,
             "account_id": bob.id(),
         }))
         .max_gas()
@@ -245,9 +244,9 @@ async fn test_nft_key() {
     println!("Bob attempting to sign with token {token_1_id}...");
 
     let bob_is_no_longer_approved = bob
-        .call(nft_key.id(), "ck_sign_hash")
+        .call(nft_key.id(), "ckt_sign_hash")
         .args_json(json!({
-            "path": token_1_id,
+            "token_id": token_1_id,
             "payload": msg_1,
         }))
         .max_gas()

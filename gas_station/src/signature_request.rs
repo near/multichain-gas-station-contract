@@ -82,7 +82,7 @@ pub enum Status {
 #[serde(crate = "near_sdk::serde")]
 pub struct SignatureRequest {
     pub status: Status,
-    pub key_path: String,
+    pub token_id: String,
     pub is_paymaster: bool,
     pub transaction: ValidTransactionRequest,
 }
@@ -95,7 +95,7 @@ impl SignatureRequest {
     ) -> Self {
         Self {
             status: Status::Pending,
-            key_path: key_path.to_string(),
+            token_id: key_path.to_string(),
             is_paymaster,
             transaction,
         }

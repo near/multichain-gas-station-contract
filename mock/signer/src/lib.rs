@@ -57,10 +57,7 @@ impl ChainKeySign for MockSignerContract {
         &mut self,
         path: String,
         payload: Vec<u8>,
-        approval_id: Option<u32>,
     ) -> PromiseOrValue<ChainKeySignature> {
-        require!(approval_id.is_none(), "Approvals not supported");
-
         let signing_key =
             construct_spoof_key(env::predecessor_account_id().as_bytes(), path.as_bytes());
         let (sig, recid) = signing_key.sign_prehash_recoverable(&payload).unwrap();

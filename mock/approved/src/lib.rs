@@ -1,5 +1,5 @@
 use lib::{
-    chain_key::{ext_chain_key_sign, ChainKeyApproved, ChainKeySignature},
+    chain_key::{ext_chain_key_sign, ChainKeySignature, ChainKeyTokenApproved},
     Rejectable,
 };
 use near_sdk::{
@@ -52,8 +52,14 @@ impl ApprovedContract {
 }
 
 #[near_bindgen]
-impl ChainKeyApproved for ApprovedContract {
-    fn ck_on_approved(&mut self, owner_id: AccountId, path: String, approval_id: u32, msg: String) {
+impl ChainKeyTokenApproved for ApprovedContract {
+    fn ckt_on_approved(
+        &mut self,
+        owner_id: AccountId,
+        path: String,
+        approval_id: u32,
+        msg: String,
+    ) {
         let _ = msg;
 
         require!(
@@ -64,7 +70,7 @@ impl ChainKeyApproved for ApprovedContract {
         self.delegated_keys.insert(&path, &(owner_id, approval_id));
     }
 
-    fn ck_on_revoked(&mut self, owner_id: AccountId, path: String, approval_id: u32, msg: String) {
+    fn ckt_on_revoked(&mut self, owner_id: AccountId, path: String, approval_id: u32, msg: String) {
         let _ = (owner_id, approval_id, msg);
 
         require!(

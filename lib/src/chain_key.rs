@@ -9,9 +9,9 @@ pub trait ChainKeySign {
         &mut self,
         path: String,
         payload: Vec<u8>, // TODO: choose encoding...base64? Or just accept a String?
-        // TODO: There may be a need for a field like this, e.g. to prove knowledge of a hash preimage.
-        // proof: Option<Vec<u8>>,
-        approval_id: Option<u32>,
+                          // TODO: There may be a need for a field like this, e.g. to prove knowledge of a hash preimage.
+                          // proof: Option<Vec<u8>>,
+                          // approval_id: Option<u32>,
     ) -> PromiseOrValue<ChainKeySignature>;
 
     // TODO: Should only one sign function exist, or both prehashed and unhashed versions should be required?
@@ -26,37 +26,54 @@ pub trait ChainKeySign {
     // TODO: functions that: verify signature, derive public key?
 }
 
-#[ext_contract(ext_chain_key_approval)]
-pub trait ChainKeyApproval {
-    fn ck_approve(
+#[ext_contract(ext_chain_key_token_sign)]
+pub trait ChainKeyTokenSign {
+    fn ckt_scheme_oid(&self) -> String;
+    fn ckt_sign_hash(
         &mut self,
-        path: String,
+        token_id: String,
+        path: Option<String>,
+        payload: Vec<u8>,
+        approval_id: Option<u32>,
+    ) -> PromiseOrValue<ChainKeySignature>;
+    fn ckt_public_key_for(
+        &mut self,
+        token_id: String,
+        path: Option<String>,
+    ) -> PromiseOrValue<String>;
+}
+
+#[ext_contract(ext_chain_key_token_approval)]
+pub trait ChainKeyTokenApproval {
+    fn ckt_approve(
+        &mut self,
+        token_id: String,
         account_id: AccountId,
         msg: Option<String>,
     ) -> PromiseOrValue<Option<u32>>;
-    fn ck_revoke(
+    fn ckt_revoke(
         &mut self,
-        path: String,
+        token_id: String,
         account_id: AccountId,
         msg: Option<String>,
     ) -> PromiseOrValue<()>;
-    fn ck_revoke_all(&mut self, path: String) -> u32;
-    fn ck_approval_id_for(&self, path: String, account_id: AccountId) -> Option<u32>;
+    fn ckt_revoke_all(&mut self, token_id: String) -> u32;
+    fn ckt_approval_id_for(&self, token_id: String, account_id: AccountId) -> Option<u32>;
 }
 
-#[ext_contract(ext_chain_key_approved)]
-pub trait ChainKeyApproved {
-    fn ck_on_approved(
+#[ext_contract(ext_chain_key_token_approved)]
+pub trait ChainKeyTokenApproved {
+    fn ckt_on_approved(
         &mut self,
         approver_id: AccountId,
-        path: String,
+        token_id: String,
         approval_id: u32,
         msg: String,
     );
-    fn ck_on_revoked(
+    fn ckt_on_revoked(
         &mut self,
         approver_id: AccountId,
-        path: String,
+        token_id: String,
         approval_id: u32,
         msg: String,
     );

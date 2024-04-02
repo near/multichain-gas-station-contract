@@ -9,8 +9,7 @@ use gas_station::{
     Nep141ReceiverCreateTransactionArgs, TransactionSequenceCreation,
 };
 use lib::{
-    asset::AssetId, foreign_address::ForeignAddress, kdf::get_mpc_address, nft_key::NftKeyMinted,
-    signer::MpcSignature,
+    asset::AssetId, foreign_address::ForeignAddress, kdf::get_mpc_address, signer::MpcSignature,
 };
 use near_sdk::{serde::Deserialize, serde_json::json};
 use near_workspaces::{
@@ -137,9 +136,9 @@ async fn test_workflow_happy_path() {
         .transact()
         .await
         .unwrap()
-        .json::<NftKeyMinted>()
+        .json::<u32>()
         .unwrap()
-        .key_path;
+        .to_string();
 
     println!("Paymaster key: {paymaster_key}");
 
@@ -181,9 +180,10 @@ async fn test_workflow_happy_path() {
         .transact()
         .await
         .unwrap()
-        .json::<NftKeyMinted>()
+        .json::<u32>()
         .unwrap()
-        .key_path;
+        .to_string();
+
     println!("Alice's NFT key: {alice_key}");
 
     println!("Transferring Alice's NFT key to gas station...");

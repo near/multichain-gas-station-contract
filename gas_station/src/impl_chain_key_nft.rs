@@ -1,5 +1,5 @@
 use ethers_core::k256::EncodedPoint;
-use lib::{nft_key::NftKeyExtraMetadata, Rejectable};
+use lib::{chain_key::ext_chain_key_token_sign, Rejectable};
 use near_sdk::{
     borsh, env, near_bindgen, require,
     serde::{Deserialize, Serialize},
@@ -35,8 +35,8 @@ impl Nep171Receiver for Contract {
         );
 
         PromiseOrValue::Promise(
-            ext_nep171::ext(env::predecessor_account_id())
-                .nft_token(token_id.clone())
+            ext_chain_key_token_sign::ext(env::predecessor_account_id())
+                .ckt_public_key_for(token_id.clone(), None)
                 .then(
                     Self::ext(env::current_account_id()).nft_on_transfer_callback(
                         sender_id,
@@ -49,26 +49,6 @@ impl Nep171Receiver for Contract {
     }
 }
 
-fn get_public_key_from_token(token: &Token) -> EncodedPoint {
-    let token_metadata: TokenMetadata = near_sdk::serde_json::from_value(
-        token
-            .extensions_metadata
-            .get("metadata")
-            .unwrap_or_reject()
-            .clone(),
-    )
-    .unwrap_or_reject();
-
-    let extra_metadata: NftKeyExtraMetadata = near_sdk::serde_json::from_str(
-        &token_metadata
-            .extra
-            .expect_or_reject("Missing extra metadata containing public key"),
-    )
-    .unwrap_or_reject();
-
-    <EncodedPoint as std::str::FromStr>::from_str(&extra_metadata.public_key).unwrap_or_reject()
-}
-
 #[near_bindgen]
 impl Contract {
     #[private]
@@ -78,11 +58,12 @@ impl Contract {
         #[serializer(borsh)] previous_owner_id: AccountId,
         #[serializer(borsh)] token_id: TokenId,
         #[serializer(borsh)] msg: String,
-        #[callback_result] result: Result<Token, PromiseError>,
+        #[callback_result] result: Result<String, PromiseError>,
     ) -> PromiseOrValue<bool> {
         let _ = sender_id;
 
-        let public_key = get_public_key_from_token(&result.unwrap());
+        let public_key =
+            <EncodedPoint as std::str::FromStr>::from_str(&result.unwrap()).unwrap_or_reject();
 
         let sent_from_contract_owner = self
             .own_get_owner()
