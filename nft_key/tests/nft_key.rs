@@ -217,11 +217,6 @@ async fn test_nft_key() {
         .await
         .unwrap();
 
-    for outcome in bob_approved_transaction.outcomes() {
-        println!("outcome executor: {}", outcome.executor_id);
-        println!("\toutcome gas: {:?}", outcome.gas_burnt);
-    }
-
     let bob_is_approved = bob_approved_transaction.json::<String>().unwrap();
 
     println!("After approval, Bob signed: {bob_is_approved}");
@@ -260,4 +255,127 @@ async fn test_nft_key() {
     );
 
     println!("Bob failed to sign with revoked key.");
+}
+
+#[tokio::test]
+async fn test_nft_key_sub_path() {
+    let w = near_workspaces::sandbox().await.unwrap();
+
+    let (nft_key, signer, alice) = tokio::join!(
+        async {
+            w.dev_deploy(&near_workspaces::compile_project("./").await.unwrap())
+                .await
+                .unwrap()
+        },
+        async {
+            w.dev_deploy(
+                &near_workspaces::compile_project("../mock/signer")
+                    .await
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        },
+        async { w.dev_create_account().await.unwrap() },
+    );
+
+    println!("{:<16} {}", "Alice:", alice.id());
+    println!("{:<16} {}", "NFT Key:", nft_key.id());
+    println!("{:<16} {}", "Signer:", signer.id());
+
+    println!("Initializing the contract...");
+
+    nft_key
+        .call("new")
+        .args_json(json!({
+            "signer_contract_id": signer.id(),
+        }))
+        .transact()
+        .await
+        .unwrap()
+        .unwrap();
+
+    println!("Initialization complete.");
+
+    println!("Registering for storage...");
+
+    alice
+        .call(nft_key.id(), "storage_deposit")
+        .args_json(json!({}))
+        .deposit(NearToken::from_near(1))
+        .transact()
+        .await
+        .unwrap()
+        .unwrap();
+
+    println!("Finished registering for storage.");
+
+    let token_1_id = alice
+        .call(nft_key.id(), "mint")
+        .args_json(json!({}))
+        .max_gas()
+        .transact()
+        .await
+        .unwrap()
+        .json::<u32>()
+        .unwrap()
+        .to_string();
+
+    let msg_1 = [1u8; 32];
+
+    let (alice_success_1, alice_success_2, alice_success_3) = tokio::join!(
+        async {
+            alice
+                .call(nft_key.id(), "ckt_sign_hash")
+                .args_json(json!({
+                    "token_id": token_1_id,
+                    "payload": msg_1,
+                }))
+                .max_gas()
+                .transact()
+                .await
+                .unwrap()
+                .json::<String>()
+                .unwrap()
+        },
+        async {
+            alice
+                .call(nft_key.id(), "ckt_sign_hash")
+                .args_json(json!({
+                    "token_id": token_1_id,
+                    "payload": msg_1,
+                    "path": "a",
+                }))
+                .max_gas()
+                .transact()
+                .await
+                .unwrap()
+                .json::<String>()
+                .unwrap()
+        },
+        async {
+            alice
+                .call(nft_key.id(), "ckt_sign_hash")
+                .args_json(json!({
+                    "token_id": token_1_id,
+                    "payload": msg_1,
+                    "path": "b",
+                }))
+                .max_gas()
+                .transact()
+                .await
+                .unwrap()
+                .json::<String>()
+                .unwrap()
+        },
+    );
+
+    assert_ne!(
+        alice_success_1, alice_success_2,
+        "signatures from different key paths should be different",
+    );
+    assert_ne!(
+        alice_success_1, alice_success_3,
+        "signatures from different key paths should be different",
+    );
 }
