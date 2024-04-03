@@ -35,5 +35,5 @@ jobs:
       - name: Build (Release)
         run: cargo make build
       
-      - name: Build (Release)
+      - name: Run Tests
         run: cargo make test
