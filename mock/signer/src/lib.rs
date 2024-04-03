@@ -32,7 +32,12 @@ impl MockSignerContract {
 
 #[near_bindgen]
 impl SignerInterface for MockSignerContract {
-    fn sign(&mut self, payload: [u8; 32], path: &String, key_version: u32) -> PromiseOrValue<MpcSignature> {
+    fn sign(
+        &mut self,
+        payload: [u8; 32],
+        path: &String,
+        key_version: u32,
+    ) -> PromiseOrValue<MpcSignature> {
         require!(key_version == 0, "Key version not supported");
         let predecessor = env::predecessor_account_id();
         let signing_key = construct_spoof_key(predecessor.as_bytes(), path.as_bytes());
@@ -44,6 +49,10 @@ impl SignerInterface for MockSignerContract {
         "secp256k1:37aFybhUHCxRdDkuCcB3yHzxqK7N8EQ745MujyAQohXSsYymVeHzhLxKvZ2qYeRHf3pGFiAsxqFJZjpF9gP2JV5u"
             .parse()
             .unwrap()
+    }
+
+    fn latest_key_version(&self) -> u32 {
+        0
     }
 }
 

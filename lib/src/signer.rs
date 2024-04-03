@@ -31,6 +31,7 @@ pub trait SignerInterface {
         key_version: u32,
     ) -> PromiseOrValue<MpcSignature>;
     fn public_key(&self) -> near_sdk::PublicKey;
+    fn latest_key_version(&self) -> u32;
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]

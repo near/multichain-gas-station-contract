@@ -7,9 +7,9 @@ use lib::{
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
+    collections::UnorderedMap,
     env, near_bindgen, require,
     serde_json::{self, json},
-    store::UnorderedMap,
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
 use near_sdk_contract_tools::hook::Hook;
@@ -20,6 +20,7 @@ use near_sdk_contract_tools::nft::*;
 enum StorageKey {
     Approvals,
     ApprovalsFor(u32),
+    KeyVersions,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PanicOnDefault, NonFungibleToken)]
@@ -29,6 +30,11 @@ pub struct NftKeyContract {
     pub next_id: u32,
     pub signer_contract_id: AccountId,
     pub approvals: UnorderedMap<u32, UnorderedMap<AccountId, u32>>,
+    pub key_versions: UnorderedMap<u32, u32>,
+}
+
+fn generate_token_metadata(id: u32) -> TokenMetadata {
+    TokenMetadata::new().title(format!("Chain Key Token #{id}"))
 }
 
 #[near_bindgen]
@@ -39,6 +45,7 @@ impl NftKeyContract {
             next_id: 0,
             signer_contract_id,
             approvals: UnorderedMap::new(StorageKey::Approvals),
+            key_versions: UnorderedMap::new(StorageKey::KeyVersions),
         };
 
         contract.set_contract_metadata(ContractMetadata::new(
@@ -56,16 +63,27 @@ impl NftKeyContract {
         id
     }
 
-    pub fn mint(&mut self) -> u32 {
+    pub fn mint(&mut self) -> Promise {
         let id = self.generate_id();
         let predecessor = env::predecessor_account_id();
 
-        self.mint_with_metadata(
-            id.to_string(),
-            predecessor,
-            TokenMetadata::new().title(format!("Chain Key Token #{id}")),
-        )
-        .unwrap_or_reject();
+        ext_signer::ext(self.signer_contract_id.clone())
+            .latest_key_version()
+            .then(Self::ext(env::current_account_id()).mint_callback(id, predecessor))
+    }
+
+    #[private]
+    pub fn mint_callback(
+        &mut self,
+        #[serializer(borsh)] id: u32,
+        #[serializer(borsh)] predecessor: AccountId,
+        #[callback_result] result: Result<u32, PromiseError>,
+    ) -> u32 {
+        let latest_key_version = result.unwrap();
+
+        self.key_versions.insert(&id, &latest_key_version);
+        self.mint_with_metadata(id.to_string(), predecessor, generate_token_metadata(id))
+            .unwrap_or_reject();
 
         id
     }
@@ -91,7 +109,7 @@ impl ChainKeyTokenSign for NftKeyContract {
                 .get(&id)
                 .and_then(|set| set.get(&expected_owner_id))
                 .zip(approval_id)
-                .map_or(false, |(id, approval_id)| id == &approval_id)
+                .map_or(false, |(id, approval_id)| id == approval_id)
         };
 
         require!(
@@ -169,7 +187,7 @@ impl NftKeyContract {
         } else {
             let ejected_id = self
                 .approvals
-                .get_mut(&token_id)
+                .get(&token_id)
                 .unwrap_or_reject()
                 .remove(&account_id);
             require!(ejected_id == Some(approval_id), "Inconsistent approval ID");
@@ -196,10 +214,13 @@ impl ChainKeyTokenApproval for NftKeyContract {
 
         let approval_id = self.generate_id();
 
-        self.approvals
-            .entry(id)
-            .or_insert_with(|| UnorderedMap::new(StorageKey::ApprovalsFor(id)))
-            .insert(account_id.clone(), approval_id);
+        let mut approvals = self
+            .approvals
+            .get(&id)
+            .unwrap_or_else(|| UnorderedMap::new(StorageKey::ApprovalsFor(id)));
+
+        approvals.insert(&account_id, &approval_id);
+        self.approvals.insert(&id, &approvals);
 
         msg.map_or(PromiseOrValue::Value(Some(approval_id)), |msg| {
             PromiseOrValue::Promise(
@@ -224,12 +245,11 @@ impl ChainKeyTokenApproval for NftKeyContract {
         let predecessor = env::predecessor_account_id();
         require!(actual_owner.as_ref() == Some(&predecessor), "Unauthorized");
 
-        let near_sdk::store::unordered_map::Entry::Occupied(mut entry) = self.approvals.entry(id)
-        else {
+        let Some(mut approvals) = self.approvals.get(&id) else {
             return PromiseOrValue::Value(());
         };
 
-        let Some(revoked_approval_id) = entry.get_mut().remove(&account_id) else {
+        let Some(revoked_approval_id) = approvals.remove(&account_id) else {
             return PromiseOrValue::Value(());
         };
 
@@ -245,22 +265,20 @@ impl ChainKeyTokenApproval for NftKeyContract {
         })
     }
 
-    fn ckt_revoke_all(&mut self, token_id: TokenId) -> u32 {
+    fn ckt_revoke_all(&mut self, token_id: TokenId) -> near_sdk::json_types::U64 {
         let id: u32 = token_id.parse().expect_or_reject("Invalid token ID");
         let actual_owner = Nep171Controller::token_owner(self, &token_id);
         let predecessor = env::predecessor_account_id();
         require!(actual_owner.as_ref() == Some(&predecessor), "Unauthorized");
 
-        let near_sdk::store::unordered_map::Entry::Occupied(mut entry) = self.approvals.entry(id)
-        else {
-            return 0;
+        let Some(mut approvals) = self.approvals.get(&id) else {
+            return 0.into();
         };
 
-        let set = entry.get_mut();
-        let len = set.len();
-        set.clear();
+        let len = approvals.len();
+        approvals.clear();
 
-        len
+        len.into()
     }
 
     fn ckt_approval_id_for(&self, token_id: TokenId, account_id: AccountId) -> Option<u32> {
@@ -269,7 +287,6 @@ impl ChainKeyTokenApproval for NftKeyContract {
         self.approvals
             .get(&id)
             .and_then(|approvals| approvals.get(&account_id))
-            .copied()
     }
 }
 

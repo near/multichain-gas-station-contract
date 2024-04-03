@@ -57,7 +57,7 @@ pub trait ChainKeyTokenApproval {
         account_id: AccountId,
         msg: Option<String>,
     ) -> PromiseOrValue<()>;
-    fn ckt_revoke_all(&mut self, token_id: String) -> u32;
+    fn ckt_revoke_all(&mut self, token_id: String) -> near_sdk::json_types::U64;
     fn ckt_approval_id_for(&self, token_id: String, account_id: AccountId) -> Option<u32>;
 }
 
