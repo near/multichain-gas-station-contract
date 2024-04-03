@@ -62,6 +62,12 @@ impl NftKeyContract {
 
         id
     }
+
+    pub fn get_approval(&self, path: &String, account: &AccountId) -> Option<&u32> {
+        self.approvals
+            .get(&path.parse().expect_or_reject("Invalid token ID"))
+            .and_then(|set| set.get(&account))
+    }
 }
 
 #[near_bindgen]
@@ -75,16 +81,13 @@ impl ChainKeySign for NftKeyContract {
         let expected_owner_id = env::predecessor_account_id();
         let actual_owner_id = self.token_owner(&path);
 
-        let is_approved = || {
-            self.approvals
-                .get(&path.parse().expect_or_reject("Invalid token ID"))
-                .and_then(|set| set.get(&expected_owner_id))
-                .zip(approval_id)
-                .map_or(false, |(id, approval_id)| id == &approval_id)
-        };
+        let is_approved = self
+            .get_approval(&path, &expected_owner_id)
+            .zip(approval_id)
+            .map_or(false, |(id, approval_id)| id == &approval_id);
 
         require!(
-            Some(&expected_owner_id) == actual_owner_id.as_ref() || is_approved(),
+            Some(&expected_owner_id) == actual_owner_id.as_ref() || is_approved,
             "Unauthorized",
         );
 

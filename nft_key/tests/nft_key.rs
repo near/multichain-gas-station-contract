@@ -13,9 +13,13 @@ async fn test_nft_key() {
                 .unwrap()
         },
         async {
-            w.dev_deploy(&near_workspaces::compile_project("../mock/signer").await.unwrap())
-                .await
-                .unwrap()
+            w.dev_deploy(
+                &near_workspaces::compile_project("../mock/signer")
+                    .await
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
         },
         async { w.dev_create_account().await.unwrap() },
         async { w.dev_create_account().await.unwrap() },
@@ -166,14 +170,26 @@ async fn test_nft_key() {
         .unwrap()
         .unwrap();
 
-    println!("Approval succeeded.");
-    println!("Bob attempting to sign with token {token_1_id}...");
+    let approval_id = bob
+        .view(nft_key.id(), "get_approval")
+        .args_json(json!({
+            "path": token_1_id,
+            "account": bob.id(),
+        }))
+        .await
+        .unwrap()
+        .json::<Option<u32>>()
+        .unwrap()
+        .unwrap();
+    println!("Approval succeeded with ID {}", approval_id);
 
+    println!("Bob attempting to sign with token {token_1_id}...");
     let bob_is_approved = bob
         .call(nft_key.id(), "ck_sign_hash")
         .args_json(json!({
             "path": token_1_id,
             "payload": msg_1,
+            "approval_id": approval_id
         }))
         .max_gas()
         .transact()

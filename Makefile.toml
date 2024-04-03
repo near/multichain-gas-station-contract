@@ -15,7 +15,7 @@ cargo build --package gas-station --target wasm32-unknown-unknown --release --fe
 workspace = false
 clear = true
 script = """
-mkdir -p target/near/{gas_station,oracle,signer}
+mkdir -p target/near/{gas_station,oracle,signer,local_ft,nft_key}
 cargo test
 """
 
@@ -23,7 +23,7 @@ cargo test
 workspace = false
 clear = true
 script = """
-mkdir -p target/near/{gas_station,oracle,signer}
+mkdir -p target/near/{gas_station,oracle,signer,local_ft,nft_key}
 cargo nextest run
 """
 
