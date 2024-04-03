@@ -10,7 +10,7 @@ use near_sdk_contract_tools::{nft::*, owner::OwnerExternal};
 
 #[allow(unused_imports)]
 use crate::ContractExt;
-use crate::{Contract, StorageKey};
+use crate::{Contract, KeyTokenManagementStatus, StorageKey, UserKeyToken};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
@@ -85,7 +85,12 @@ impl Contract {
                     UnorderedMap::new(StorageKey::ManagedKeysFor(previous_owner_id))
                 });
 
-            user_keys.insert(token_id, public_key.to_bytes().into_vec());
+            let user_key_token = UserKeyToken {
+                public_key_bytes: public_key.to_bytes().into_vec(),
+                management_status: KeyTokenManagementStatus::Owned,
+            };
+
+            user_keys.insert(token_id, user_key_token);
         }
 
         PromiseOrValue::Value(false)
@@ -99,11 +104,13 @@ impl Contract {
             .get_mut(&predecessor)
             .expect_or_reject("No managed keys found for predecessor");
 
-        let owned = user_keys.remove(&token_id);
+        let owned = user_keys
+            .remove(&token_id)
+            .expect_or_reject("Token was not sent to this contract by predecessor");
 
         require!(
-            owned.is_some(),
-            "Token was not sent to this contract by predecessor"
+            owned.management_status.is_owned(),
+            "The key is not owned by this contract",
         );
 
         if let Some(msg) = msg {

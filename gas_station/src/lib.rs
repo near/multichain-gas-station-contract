@@ -131,6 +131,50 @@ pub struct TransactionSequenceCreation {
     pub pending_signature_count: u32,
 }
 
+#[derive(
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+    JsonSchema,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+)]
+#[serde(crate = "near_sdk::serde")]
+pub struct UserKeyToken {
+    pub public_key_bytes: Vec<u8>,
+    pub management_status: KeyTokenManagementStatus,
+}
+
+#[derive(
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+    JsonSchema,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+)]
+#[serde(crate = "near_sdk::serde")]
+pub enum KeyTokenManagementStatus {
+    Owned,
+    Approved,
+}
+
+impl KeyTokenManagementStatus {
+    pub fn is_owned(&self) -> bool {
+        matches!(self, Self::Owned)
+    }
+
+    pub fn is_approved(&self) -> bool {
+        matches!(self, Self::Approved)
+    }
+}
+
 #[derive(BorshSerialize, BorshDeserialize, BorshStorageKey, Hash, Clone, Debug, PartialEq, Eq)]
 pub enum StorageKey {
     SenderWhitelist,
@@ -146,6 +190,7 @@ pub enum StorageKey {
     PaymasterKeys,
 }
 
+// TODO: Cooldown timer/lock on nft keys before they can be returned to the user or used again in the gas station contract to avoid race condition
 // TODO: Storage management
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Owner, Pause)]
 #[near_bindgen]
@@ -157,7 +202,7 @@ pub struct Contract {
     pub flags: Flags,
     pub expire_sequence_after_blocks: u64,
     pub foreign_chains: UnorderedMap<u64, ChainConfiguration>,
-    pub user_keys: UnorderedMap<AccountId, UnorderedMap<String, Vec<u8>>>,
+    pub user_keys: UnorderedMap<AccountId, UnorderedMap<String, UserKeyToken>>,
     pub paymaster_keys: UnorderedMap<String, Vec<u8>>,
     pub sender_whitelist: UnorderedSet<AccountId>,
     pub receiver_whitelist: UnorderedSet<ForeignAddress>,
@@ -350,12 +395,13 @@ impl Contract {
             .next_paymaster_notmut()
             .expect_or_reject("No paymasters found");
 
-        let sender_public_key = self
+        let sender_public_key = &self
             .user_keys
             .get(&sender)
             .expect_or_reject("No managed keys for sender")
             .get(&key_path)
-            .expect_or_reject("Sender is unauthorized for the requested key path");
+            .expect_or_reject("Sender is unauthorized for the requested key path")
+            .public_key_bytes;
 
         let sender_foreign_address = ForeignAddress::from_raw_public_key(sender_public_key);
 

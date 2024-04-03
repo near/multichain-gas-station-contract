@@ -350,11 +350,12 @@ impl Contract {
         key_path: String,
     ) -> ForeignAddress {
         ForeignAddress::from_raw_public_key(
-            self.user_keys
+            &self.user_keys
                 .get(&account_id)
                 .unwrap_or_reject()
                 .get(&key_path)
-                .unwrap_or_reject(),
+                .unwrap_or_reject()
+                .public_key_bytes,
         )
     }
 
