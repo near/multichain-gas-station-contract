@@ -425,7 +425,7 @@ impl Contract {
 
         #[allow(clippy::cast_possible_truncation)]
         ext_signer::ext(self.signer_contract_id.clone()) // TODO: Gas.
-            .sign(payload, &next_signature_request.key_path)
+            .sign(payload, &next_signature_request.key_path, 1)
             .then(Self::ext(env::current_account_id()).sign_next_callback(id.into(), index as u32))
     }
 
