@@ -1,8 +1,8 @@
-name: Rust
+name: Rust NEAR Contract CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master" ]
   pull_request:
 
 env:
