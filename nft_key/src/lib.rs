@@ -18,9 +18,14 @@ use near_sdk_contract_tools::nft::*;
 
 #[derive(Debug, BorshSerialize, BorshStorageKey)]
 enum StorageKey {
-    Approvals,
+    KeyData,
     ApprovalsFor(u32),
-    KeyVersions,
+}
+
+#[derive(Debug, BorshSerialize, BorshDeserialize)]
+pub struct KeyData {
+    pub approvals: UnorderedMap<AccountId, u32>,
+    pub mpc_key_version: u32,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PanicOnDefault, NonFungibleToken)]
@@ -29,8 +34,7 @@ enum StorageKey {
 pub struct NftKeyContract {
     pub next_id: u32,
     pub signer_contract_id: AccountId,
-    pub approvals: UnorderedMap<u32, UnorderedMap<AccountId, u32>>,
-    pub key_versions: UnorderedMap<u32, u32>,
+    pub key_data: UnorderedMap<u32, KeyData>,
 }
 
 fn generate_token_metadata(id: u32) -> TokenMetadata {
@@ -44,8 +48,7 @@ impl NftKeyContract {
         let mut contract = Self {
             next_id: 0,
             signer_contract_id,
-            approvals: UnorderedMap::new(StorageKey::Approvals),
-            key_versions: UnorderedMap::new(StorageKey::KeyVersions),
+            key_data: UnorderedMap::new(StorageKey::KeyData),
         };
 
         contract.set_contract_metadata(ContractMetadata::new(
@@ -81,7 +84,13 @@ impl NftKeyContract {
     ) -> u32 {
         let latest_key_version = result.unwrap();
 
-        self.key_versions.insert(&id, &latest_key_version);
+        self.key_data.insert(
+            &id,
+            &KeyData {
+                mpc_key_version: latest_key_version,
+                approvals: UnorderedMap::new(StorageKey::ApprovalsFor(id)),
+            },
+        );
         self.mint_with_metadata(id.to_string(), predecessor, generate_token_metadata(id))
             .unwrap_or_reject();
 
@@ -104,16 +113,18 @@ impl ChainKeyTokenSign for NftKeyContract {
         let expected_owner_id = env::predecessor_account_id();
         let actual_owner_id = self.token_owner(&token_id.to_string());
 
-        let is_approved = || {
-            self.approvals
-                .get(&id)
-                .and_then(|set| set.get(&expected_owner_id))
-                .zip(approval_id)
-                .map_or(false, |(id, approval_id)| id == approval_id)
-        };
+        let key_data = self
+            .key_data
+            .get(&id)
+            .expect_or_reject("Missing data for key");
 
         require!(
-            Some(&expected_owner_id) == actual_owner_id.as_ref() || is_approved(),
+            Some(&expected_owner_id) == actual_owner_id.as_ref()
+                || key_data
+                    .approvals
+                    .get(&env::predecessor_account_id())
+                    .zip(approval_id)
+                    .map_or(false, |(actual, expected)| actual == expected),
             "Unauthorized",
         );
 
@@ -185,11 +196,9 @@ impl NftKeyContract {
         if result.is_ok() {
             Some(approval_id)
         } else {
-            let ejected_id = self
-                .approvals
-                .get(&token_id)
-                .unwrap_or_reject()
-                .remove(&account_id);
+            let mut key_data = self.key_data.get(&token_id).unwrap_or_reject();
+            let ejected_id = key_data.approvals.remove(&account_id);
+            self.key_data.insert(&token_id, &key_data);
             require!(ejected_id == Some(approval_id), "Inconsistent approval ID");
             None
         }
@@ -214,13 +223,12 @@ impl ChainKeyTokenApproval for NftKeyContract {
 
         let approval_id = self.generate_id();
 
-        let mut approvals = self
-            .approvals
+        let mut key_data = self
+            .key_data
             .get(&id)
-            .unwrap_or_else(|| UnorderedMap::new(StorageKey::ApprovalsFor(id)));
-
-        approvals.insert(&account_id, &approval_id);
-        self.approvals.insert(&id, &approvals);
+            .expect_or_reject("Missing data for key");
+        key_data.approvals.insert(&account_id, &approval_id);
+        self.key_data.insert(&id, &key_data);
 
         msg.map_or(PromiseOrValue::Value(Some(approval_id)), |msg| {
             PromiseOrValue::Promise(
@@ -245,13 +253,15 @@ impl ChainKeyTokenApproval for NftKeyContract {
         let predecessor = env::predecessor_account_id();
         require!(actual_owner.as_ref() == Some(&predecessor), "Unauthorized");
 
-        let Some(mut approvals) = self.approvals.get(&id) else {
+        let Some(mut key_data) = self.key_data.get(&id) else {
             return PromiseOrValue::Value(());
         };
 
-        let Some(revoked_approval_id) = approvals.remove(&account_id) else {
+        let Some(revoked_approval_id) = key_data.approvals.remove(&account_id) else {
             return PromiseOrValue::Value(());
         };
+
+        self.key_data.insert(&id, &key_data);
 
         msg.map_or(PromiseOrValue::Value(()), |msg| {
             PromiseOrValue::Promise(
@@ -271,12 +281,13 @@ impl ChainKeyTokenApproval for NftKeyContract {
         let predecessor = env::predecessor_account_id();
         require!(actual_owner.as_ref() == Some(&predecessor), "Unauthorized");
 
-        let Some(mut approvals) = self.approvals.get(&id) else {
+        let Some(mut key_data) = self.key_data.get(&id) else {
             return 0.into();
         };
 
-        let len = approvals.len();
-        approvals.clear();
+        let len = key_data.approvals.len();
+        key_data.approvals.clear();
+        self.key_data.insert(&id, &key_data);
 
         len.into()
     }
@@ -284,9 +295,9 @@ impl ChainKeyTokenApproval for NftKeyContract {
     fn ckt_approval_id_for(&self, token_id: TokenId, account_id: AccountId) -> Option<u32> {
         let id: u32 = token_id.parse().expect_or_reject("Invalid token ID");
 
-        self.approvals
+        self.key_data
             .get(&id)
-            .and_then(|approvals| approvals.get(&account_id))
+            .and_then(|key_data| key_data.approvals.get(&account_id))
     }
 }
 
