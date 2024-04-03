@@ -42,8 +42,8 @@ impl NftKeyContract {
         };
 
         contract.set_contract_metadata(ContractMetadata::new(
-            "Chain Key".to_string(),
-            "CK".to_string(),
+            "Chain Key Token".to_string(),
+            "CKT".to_string(),
             None,
         ));
 
@@ -63,7 +63,7 @@ impl NftKeyContract {
         self.mint_with_metadata(
             id.to_string(),
             predecessor,
-            TokenMetadata::new().title(format!("Chain Key #{id}")),
+            TokenMetadata::new().title(format!("Chain Key Token #{id}")),
         )
         .unwrap_or_reject();
 
