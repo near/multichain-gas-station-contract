@@ -1,0 +1,39 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Additional Rust Tools
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install cargo-make
+
+      - name: Lint & Clippy
+        run: cargo make lint
+
+      - name: Build (Release)
+        run: cargo make build
+      
+      - name: Build (Release)
+        run: cargo make test
