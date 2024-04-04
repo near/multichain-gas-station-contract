@@ -2,7 +2,7 @@ name: Rust NEAR Contract CI
 
 on:
   push:
-    branches: [ "master" ]
+    branches: ['master']
   pull_request:
 
 env:
@@ -36,4 +36,4 @@ jobs:
         run: cargo make build
 
       - name: Tests
-        run: cargo make test
+        run: cargo make nextest
