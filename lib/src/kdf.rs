@@ -108,6 +108,18 @@ pub fn get_mpc_address(
     Ok(derive_evm_address_for_account(affine, gas_station_account_id, caller_account_id).into())
 }
 
+pub fn derive_public_key_for(
+    mpc_public_key: near_sdk::PublicKey,
+    predecessor_account_id: &AccountId,
+    path: &str,
+) -> Result<EncodedPoint, PublicKeyConversionError> {
+    let affine = near_public_key_to_affine(mpc_public_key)?;
+    let epsilon = derive_epsilon(predecessor_account_id, path);
+    let affine_point = derive_key(affine, epsilon);
+
+    Ok(affine_point.to_encoded_point(false))
+}
+
 #[test]
 fn test_keys() {
     let public_key: near_sdk::PublicKey = "secp256k1:47xve2ymatpG4x4Gp7pmYwuLJk7eeRegrFuS4VoW5VV4i3GsBiBY87vkH6UZiiY18NeZnkBzcZzipDbJJ5pmjTcc"
