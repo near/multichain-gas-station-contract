@@ -14,11 +14,11 @@ use lib::{
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
+    collections::{UnorderedMap, UnorderedSet, Vector},
     env,
     json_types::{U128, U64},
     near_bindgen, require,
     serde::{Deserialize, Serialize},
-    store::{UnorderedMap, UnorderedSet, Vector},
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
 #[allow(clippy::wildcard_imports)]
@@ -300,14 +300,14 @@ impl Contract {
         self.filter_transaction(&account_id, &transaction);
 
         // Assert predecessor can use requested key path
-        let user_keys = self
+        let user_chain_keys = self
             .user_chain_keys
             .get(&account_id)
             .expect_or_reject("No managed keys for predecessor");
-        require!(
-            user_keys.contains_key(&token_id),
-            "Predecessor unauthorized for the requested chain key token ID",
-        );
+
+        let user_chain_key = user_chain_keys
+            .get(&token_id)
+            .expect_or_reject("Predecessor unauthorized for the requested chain key token ID");
 
         let use_paymaster = use_paymaster.unwrap_or(false);
 
@@ -340,12 +340,10 @@ impl Contract {
         } else {
             let chain_id = transaction.chain_id;
 
-            let authorization = user_keys.get(&token_id).unwrap_or_reject().authorization;
-
             let pending_transaction_sequence = PendingTransactionSequence {
                 signature_requests: vec![SignatureRequest::new(
                     &token_id,
-                    authorization,
+                    user_chain_key.authorization,
                     transaction,
                     false,
                 )],
@@ -378,9 +376,9 @@ impl Contract {
         #[callback_result] result: Result<PriceData, PromiseError>,
     ) -> TransactionSequenceCreation {
         // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
-        let foreign_chain_configuration = self
+        let mut foreign_chain_configuration = self
             .foreign_chains
-            .get_mut(&transaction_request.chain_id)
+            .get(&transaction_request.chain_id)
             .expect_or_reject(ChainConfigurationDoesNotExistError {
                 chain_id: transaction_request.chain_id,
             });
@@ -412,7 +410,7 @@ impl Contract {
         }
 
         let mut paymaster = foreign_chain_configuration
-            .next_paymaster_notmut()
+            .next_paymaster()
             .expect_or_reject("No paymasters found");
 
         let user_key = self
@@ -447,6 +445,8 @@ impl Contract {
         foreign_chain_configuration
             .paymasters
             .insert(&paymaster.token_id, &paymaster);
+        self.foreign_chains
+            .insert(&transaction_request.chain_id, &foreign_chain_configuration);
 
         let signature_requests = vec![
             SignatureRequest::new(
@@ -487,9 +487,9 @@ impl Contract {
 
         let id = id.0;
 
-        let transaction = self
+        let mut transaction = self
             .pending_transaction_sequences
-            .get_mut(&id)
+            .get(&id)
             .expect_or_reject(TransactionSequenceDoesNotExistError {
                 transaction_sequence_id: id,
             });
@@ -527,7 +527,7 @@ impl Contract {
         };
 
         #[allow(clippy::cast_possible_truncation)]
-        ext_chain_key_token::ext(self.signer_contract_id.clone()) // TODO: Gas.
+        let ret = ext_chain_key_token::ext(self.signer_contract_id.clone()) // TODO: Gas.
             .ckt_sign_hash(
                 next_signature_request.token_id.clone(),
                 None,
@@ -539,7 +539,11 @@ impl Contract {
                     .with_static_gas(near_sdk::Gas::ONE_TERA * 3)
                     .with_unused_gas_weight(0)
                     .sign_next_callback(id.into(), index as u32),
-            )
+            );
+
+        self.pending_transaction_sequences.insert(&id, &transaction);
+
+        ret
     }
 
     #[private]
@@ -551,9 +555,9 @@ impl Contract {
     ) -> String {
         let id = id.0;
 
-        let pending_transaction_sequence = self
+        let mut pending_transaction_sequence = self
             .pending_transaction_sequences
-            .get_mut(&id)
+            .get(&id)
             .expect_or_reject(TransactionSequenceDoesNotExistError {
                 transaction_sequence_id: id,
             });
@@ -589,11 +593,10 @@ impl Contract {
         // Remove escrow from record.
         // This is important to ensuring that refund logic works correctly.
         if let Some(escrow) = pending_transaction_sequence.escrow.take() {
-            let collected_fees = self
-                .collected_fees
-                .entry(escrow.asset_id.clone())
-                .or_insert(U128(0));
+            let mut collected_fees = self.collected_fees.get(&escrow.asset_id).unwrap_or(U128(0));
             collected_fees.0 += escrow.amount.0;
+            self.collected_fees
+                .insert(&escrow.asset_id, &collected_fees);
         }
 
         let chain_id = request.transaction.chain_id;
@@ -610,6 +613,9 @@ impl Contract {
                 }
             });
 
+        self.pending_transaction_sequences
+            .insert(&id, &pending_transaction_sequence);
+
         if let Some(all_signatures) = all_signatures {
             let e = TransactionSequenceSigned {
                 id: id.into(),
@@ -624,7 +630,7 @@ impl Contract {
             };
 
             self.signed_transaction_sequences
-                .push(TransactionSequenceSignedEventAt {
+                .push(&TransactionSequenceSignedEventAt {
                     block_height: env::block_height(),
                     event: e.clone(),
                 });
@@ -697,21 +703,26 @@ pub struct SignatureRequestDoesNoteExistError {
 }
 
 impl Contract {
+    fn with_mut_chain<R>(
+        &mut self,
+        chain_id: u64,
+        f: impl FnOnce(&mut ChainConfiguration) -> R,
+    ) -> R {
+        let mut config = self
+            .foreign_chains
+            .get(&chain_id)
+            .expect_or_reject(ChainConfigurationDoesNotExistError { chain_id });
+        let ret = f(&mut config);
+        self.foreign_chains.insert(&chain_id, &config);
+        ret
+    }
+
     fn get_chain(
         &self,
         chain_id: u64,
-    ) -> Result<&ChainConfiguration, ChainConfigurationDoesNotExistError> {
+    ) -> Result<ChainConfiguration, ChainConfigurationDoesNotExistError> {
         self.foreign_chains
             .get(&chain_id)
-            .ok_or(ChainConfigurationDoesNotExistError { chain_id })
-    }
-
-    fn get_chain_mut(
-        &mut self,
-        chain_id: u64,
-    ) -> Result<&mut ChainConfiguration, ChainConfigurationDoesNotExistError> {
-        self.foreign_chains
-            .get_mut(&chain_id)
             .ok_or(ChainConfigurationDoesNotExistError { chain_id })
     }
 
@@ -752,7 +763,7 @@ impl Contract {
         let id = self.generate_unique_id();
 
         self.pending_transaction_sequences
-            .insert(id, pending_transaction);
+            .insert(&id, &pending_transaction);
 
         TransactionSequenceCreation {
             id: id.into(),

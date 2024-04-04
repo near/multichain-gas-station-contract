@@ -4,9 +4,10 @@ use lib::{
     Rejectable,
 };
 use near_sdk::{
-    borsh, env, near_bindgen, require,
+    borsh,
+    collections::UnorderedMap,
+    env, near_bindgen, require,
     serde::{Deserialize, Serialize},
-    store::UnorderedMap,
     AccountId, Promise, PromiseError, PromiseOrValue,
 };
 use near_sdk_contract_tools::{nft::*, owner::OwnerExternal};
@@ -79,21 +80,23 @@ impl Contract {
 
         if sent_from_contract_owner && marked_as_paymaster_key() {
             self.paymaster_keys
-                .insert(token_id, public_key.to_bytes().into_vec());
+                .insert(&token_id, &public_key.to_bytes().into_vec());
         } else {
-            let user_chain_keys = self
-                .user_chain_keys
-                .entry(previous_owner_id.clone())
-                .or_insert_with(|| {
-                    UnorderedMap::new(StorageKey::UserChainKeysFor(previous_owner_id))
-                });
+            let mut user_chain_keys =
+                self.user_chain_keys
+                    .get(&previous_owner_id)
+                    .unwrap_or_else(|| {
+                        UnorderedMap::new(StorageKey::UserChainKeysFor(previous_owner_id.clone()))
+                    });
 
             let user_key_token = UserChainKey {
                 public_key_bytes: public_key.to_bytes().into_vec(),
                 authorization: ChainKeyAuthorization::Owned,
             };
 
-            user_chain_keys.insert(token_id, user_key_token);
+            user_chain_keys.insert(&token_id, &user_key_token);
+            self.user_chain_keys
+                .insert(&previous_owner_id, &user_chain_keys);
         }
 
         PromiseOrValue::Value(false)
@@ -102,14 +105,16 @@ impl Contract {
     pub fn recover_nft_key(&mut self, token_id: TokenId, msg: Option<String>) -> Promise {
         let predecessor = env::predecessor_account_id();
 
-        let user_keys = self
+        let mut user_keys = self
             .user_chain_keys
-            .get_mut(&predecessor)
+            .get(&predecessor)
             .expect_or_reject("No managed keys found for predecessor");
 
         let owned = user_keys
             .remove(&token_id)
             .expect_or_reject("Token was not sent to this contract by predecessor");
+
+        self.user_chain_keys.insert(&predecessor, &user_keys);
 
         require!(
             owned.authorization.is_owned(),
@@ -184,11 +189,12 @@ impl ChainKeyTokenApprovalReceiver for Contract {
             "Unknown chain key NFT contract",
         );
 
-        let Some(user_chain_keys) = self.user_chain_keys.get_mut(&approver_id) else {
+        let Some(mut user_chain_keys) = self.user_chain_keys.get(&approver_id) else {
             return PromiseOrValue::Value(());
         };
 
         let removed = user_chain_keys.remove(&token_id);
+        self.user_chain_keys.insert(&approver_id, &user_chain_keys);
 
         if let Some(removed) = removed {
             require!(
@@ -214,16 +220,16 @@ impl Contract {
         let public_key =
             <EncodedPoint as std::str::FromStr>::from_str(&result.unwrap()).unwrap_or_reject();
 
-        let user_chain_keys = self
-            .user_chain_keys
-            .entry(approver_id.clone())
-            .or_insert_with(|| UnorderedMap::new(StorageKey::UserChainKeysFor(approver_id)));
+        let mut user_chain_keys = self.user_chain_keys.get(&approver_id).unwrap_or_else(|| {
+            UnorderedMap::new(StorageKey::UserChainKeysFor(approver_id.clone()))
+        });
 
         let user_chain_key = UserChainKey {
             public_key_bytes: public_key.to_bytes().into_vec(),
             authorization: ChainKeyAuthorization::Approved(approval_id),
         };
 
-        user_chain_keys.insert(token_id, user_chain_key);
+        user_chain_keys.insert(&token_id, &user_chain_key);
+        self.user_chain_keys.insert(&approver_id, &user_chain_keys);
     }
 }

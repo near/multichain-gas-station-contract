@@ -18,7 +18,8 @@ impl Nep141Receiver for Contract {
 
         let asset_is_supported = self
             .supported_assets_oracle_asset_ids
-            .contains_key(&asset_id);
+            .get(&asset_id)
+            .is_some();
 
         if !asset_is_supported {
             // Unknown assets: ignore.

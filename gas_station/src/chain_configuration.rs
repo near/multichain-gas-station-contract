@@ -72,7 +72,7 @@ impl ChainConfiguration {
         U256(self.transfer_gas)
     }
 
-    pub fn next_paymaster_notmut(&mut self) -> Option<PaymasterConfiguration> {
+    pub fn next_paymaster(&mut self) -> Option<PaymasterConfiguration> {
         let paymaster_key = self
             .paymasters
             .ceil_key(&self.next_paymaster)
