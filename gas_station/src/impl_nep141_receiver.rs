@@ -26,7 +26,7 @@ impl Nep141Receiver for Contract {
         }
 
         let Nep141ReceiverCreateTransactionArgs {
-            key_path,
+            token_id,
             transaction_rlp_hex,
             use_paymaster,
         } = if let Ok(args) =
@@ -38,7 +38,7 @@ impl Nep141Receiver for Contract {
         };
 
         let creation_promise_or_value = self.create_transaction_inner(
-            key_path,
+            token_id,
             sender_id,
             transaction_rlp_hex,
             use_paymaster,

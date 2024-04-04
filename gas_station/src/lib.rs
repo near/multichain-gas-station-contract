@@ -109,7 +109,7 @@ pub struct TransactionSequenceSignedEventAt {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(crate = "near_sdk::serde")]
 pub struct Nep141ReceiverCreateTransactionArgs {
-    pub key_path: String,
+    pub token_id: String,
     pub transaction_rlp_hex: String,
     pub use_paymaster: Option<bool>,
 }
@@ -143,9 +143,9 @@ pub struct TransactionSequenceCreation {
     Eq,
 )]
 #[serde(crate = "near_sdk::serde")]
-pub struct UserKeyToken {
+pub struct UserChainKey {
     pub public_key_bytes: Vec<u8>,
-    pub management_status: KeyTokenManagementStatus,
+    pub authorization: ChainKeyAuthorization,
 }
 
 #[derive(
@@ -155,23 +155,36 @@ pub struct UserKeyToken {
     BorshDeserialize,
     JsonSchema,
     Clone,
+    Copy,
     Debug,
     PartialEq,
     Eq,
 )]
 #[serde(crate = "near_sdk::serde")]
-pub enum KeyTokenManagementStatus {
+pub enum ChainKeyAuthorization {
     Owned,
-    Approved,
+    Approved(u32),
 }
 
-impl KeyTokenManagementStatus {
+impl ChainKeyAuthorization {
     pub fn is_owned(&self) -> bool {
         matches!(self, Self::Owned)
     }
 
     pub fn is_approved(&self) -> bool {
-        matches!(self, Self::Approved)
+        matches!(self, Self::Approved(..))
+    }
+
+    pub fn is_approved_with_id(&self, approval_id: u32) -> bool {
+        self == &Self::Approved(approval_id)
+    }
+
+    pub fn to_approval_id(&self) -> Option<u32> {
+        if let Self::Approved(approval_id) = self {
+            Some(*approval_id)
+        } else {
+            None
+        }
     }
 }
 
@@ -185,8 +198,8 @@ pub enum StorageKey {
     CollectedFees,
     SignedTransactionSequences,
     SupportedAssets,
-    ManagedKeys,
-    ManagedKeysFor(AccountId),
+    UserChainKeys,
+    UserChainKeysFor(AccountId),
     PaymasterKeys,
 }
 
@@ -202,7 +215,7 @@ pub struct Contract {
     pub flags: Flags,
     pub expire_sequence_after_blocks: u64,
     pub foreign_chains: UnorderedMap<u64, ChainConfiguration>,
-    pub user_keys: UnorderedMap<AccountId, UnorderedMap<String, UserKeyToken>>,
+    pub user_chain_keys: UnorderedMap<AccountId, UnorderedMap<String, UserChainKey>>,
     pub paymaster_keys: UnorderedMap<String, Vec<u8>>,
     pub sender_whitelist: UnorderedSet<AccountId>,
     pub receiver_whitelist: UnorderedSet<ForeignAddress>,
@@ -231,7 +244,7 @@ impl Contract {
             expire_sequence_after_blocks: expire_sequence_after_blocks
                 .map_or(DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS, u64::from),
             foreign_chains: UnorderedMap::new(StorageKey::ForeignChains),
-            user_keys: UnorderedMap::new(StorageKey::ManagedKeys),
+            user_chain_keys: UnorderedMap::new(StorageKey::UserChainKeys),
             paymaster_keys: UnorderedMap::new(StorageKey::PaymasterKeys),
             sender_whitelist: UnorderedSet::new(StorageKey::SenderWhitelist),
             receiver_whitelist: UnorderedSet::new(StorageKey::ReceiverWhitelist),
@@ -256,12 +269,12 @@ impl Contract {
     #[payable]
     pub fn create_transaction(
         &mut self,
-        key_path: String,
+        token_id: String,
         transaction_rlp_hex: String,
         use_paymaster: Option<bool>,
     ) -> PromiseOrValue<TransactionSequenceCreation> {
         self.create_transaction_inner(
-            key_path,
+            token_id,
             env::predecessor_account_id(),
             transaction_rlp_hex,
             use_paymaster,
@@ -271,7 +284,7 @@ impl Contract {
 
     fn create_transaction_inner(
         &mut self,
-        key_path: String,
+        token_id: String,
         account_id: AccountId,
         transaction_rlp_hex: String,
         use_paymaster: Option<bool>,
@@ -288,12 +301,12 @@ impl Contract {
 
         // Assert predecessor can use requested key path
         let user_keys = self
-            .user_keys
+            .user_chain_keys
             .get(&account_id)
             .expect_or_reject("No managed keys for predecessor");
         require!(
-            user_keys.contains_key(&key_path),
-            "Predecessor unauthorized for the requested key path",
+            user_keys.contains_key(&token_id),
+            "Predecessor unauthorized for the requested chain key token ID",
         );
 
         let use_paymaster = use_paymaster.unwrap_or(false);
@@ -317,7 +330,7 @@ impl Contract {
                 .then(
                     Self::ext(env::current_account_id()).create_transaction_callback(
                         account_id,
-                        key_path,
+                        token_id,
                         deposit,
                         supported_asset_oracle_asset_id.clone(),
                         transaction,
@@ -327,8 +340,15 @@ impl Contract {
         } else {
             let chain_id = transaction.chain_id;
 
+            let authorization = user_keys.get(&token_id).unwrap_or_reject().authorization;
+
             let pending_transaction_sequence = PendingTransactionSequence {
-                signature_requests: vec![SignatureRequest::new(&key_path, transaction, false)],
+                signature_requests: vec![SignatureRequest::new(
+                    &token_id,
+                    authorization,
+                    transaction,
+                    false,
+                )],
                 created_by_account_id: account_id,
                 created_at_block_height: env::block_height().into(),
                 escrow: None,
@@ -351,7 +371,7 @@ impl Contract {
     pub fn create_transaction_callback(
         &mut self,
         #[serializer(borsh)] sender: AccountId,
-        #[serializer(borsh)] key_path: String,
+        #[serializer(borsh)] token_id: String,
         #[serializer(borsh)] deposit: AssetBalance,
         #[serializer(borsh)] oracle_asset_id: String,
         #[serializer(borsh)] transaction_request: ValidTransactionRequest,
@@ -395,15 +415,15 @@ impl Contract {
             .next_paymaster_notmut()
             .expect_or_reject("No paymasters found");
 
-        let sender_public_key = &self
-            .user_keys
+        let user_key = self
+            .user_chain_keys
             .get(&sender)
             .expect_or_reject("No managed keys for sender")
-            .get(&key_path)
-            .expect_or_reject("Sender is unauthorized for the requested key path")
-            .public_key_bytes;
+            .get(&token_id)
+            .expect_or_reject("Sender is unauthorized for the requested key path");
 
-        let sender_foreign_address = ForeignAddress::from_raw_public_key(sender_public_key);
+        let sender_foreign_address =
+            ForeignAddress::from_raw_public_key(&user_key.public_key_bytes);
 
         let chain_id = transaction_request.chain_id;
 
@@ -426,11 +446,21 @@ impl Contract {
 
         foreign_chain_configuration
             .paymasters
-            .insert(&paymaster.key_path, &paymaster);
+            .insert(&paymaster.token_id, &paymaster);
 
         let signature_requests = vec![
-            SignatureRequest::new(&paymaster.key_path, paymaster_transaction, true),
-            SignatureRequest::new(&key_path, transaction_request.clone(), false),
+            SignatureRequest::new(
+                &paymaster.token_id,
+                ChainKeyAuthorization::Owned,
+                paymaster_transaction,
+                true,
+            ),
+            SignatureRequest::new(
+                &token_id,
+                user_key.authorization,
+                transaction_request.clone(),
+                false,
+            ),
         ];
 
         let pending_transaction_sequence = PendingTransactionSequence {
@@ -502,7 +532,7 @@ impl Contract {
                 next_signature_request.token_id.clone(),
                 None,
                 payload.to_vec(),
-                None,
+                next_signature_request.authorization.to_approval_id(),
             )
             .then(
                 Self::ext(env::current_account_id())

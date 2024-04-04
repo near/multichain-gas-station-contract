@@ -26,7 +26,7 @@ use thiserror::Error;
 #[serde(crate = "near_sdk::serde")]
 pub struct PaymasterConfiguration {
     pub nonce: u32,
-    pub key_path: String,
+    pub token_id: String,
     pub minimum_available_balance: [u64; 4],
 }
 
@@ -49,7 +49,7 @@ impl PaymasterConfiguration {
 #[serde(crate = "near_sdk::serde")]
 pub struct ViewPaymasterConfiguration {
     pub nonce: u32,
-    pub key_path: String,
+    pub token_id: String,
     pub foreign_address: ForeignAddress,
     pub minimum_available_balance: U128,
 }

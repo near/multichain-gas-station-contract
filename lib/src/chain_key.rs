@@ -61,20 +61,20 @@ pub trait ChainKeyTokenApproval {
     fn ckt_approval_id_for(&self, token_id: String, account_id: AccountId) -> Option<u32>;
 }
 
-#[ext_contract(ext_chain_key_token_approved)]
-pub trait ChainKeyTokenApproved {
+#[ext_contract(ext_chain_key_token_approval_receiver)]
+pub trait ChainKeyTokenApprovalReceiver {
     fn ckt_on_approved(
         &mut self,
         approver_id: AccountId,
         token_id: String,
         approval_id: u32,
         msg: String,
-    );
+    ) -> PromiseOrValue<()>;
     fn ckt_on_revoked(
         &mut self,
         approver_id: AccountId,
         token_id: String,
         approval_id: u32,
         msg: String,
-    );
+    ) -> PromiseOrValue<()>;
 }

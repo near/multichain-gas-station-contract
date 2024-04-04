@@ -1,6 +1,7 @@
 use lib::{
     chain_key::{
-        ext_chain_key_token_approved, ChainKeySignature, ChainKeyTokenApproval, ChainKeyTokenSign,
+        ext_chain_key_token_approval_receiver, ChainKeySignature, ChainKeyTokenApproval,
+        ChainKeyTokenSign,
     },
     signer::{ext_signer, MpcSignature},
     Rejectable,
@@ -232,7 +233,7 @@ impl ChainKeyTokenApproval for NftKeyContract {
 
         msg.map_or(PromiseOrValue::Value(Some(approval_id)), |msg| {
             PromiseOrValue::Promise(
-                ext_chain_key_token_approved::ext(account_id).ckt_on_approved(
+                ext_chain_key_token_approval_receiver::ext(account_id).ckt_on_approved(
                     predecessor,
                     token_id,
                     approval_id,
@@ -265,7 +266,7 @@ impl ChainKeyTokenApproval for NftKeyContract {
 
         msg.map_or(PromiseOrValue::Value(()), |msg| {
             PromiseOrValue::Promise(
-                ext_chain_key_token_approved::ext(account_id).ckt_on_revoked(
+                ext_chain_key_token_approval_receiver::ext(account_id).ckt_on_revoked(
                     predecessor,
                     token_id,
                     revoked_approval_id,

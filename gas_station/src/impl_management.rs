@@ -195,66 +195,66 @@ impl Contract {
         &mut self,
         chain_id: U64,
         nonce: u32,
-        key_path: String,
+        token_id: String,
         balance: Option<near_sdk::json_types::U128>,
     ) {
         self.assert_owner();
 
         require!(
-            self.paymaster_keys.contains_key(&key_path),
+            self.paymaster_keys.contains_key(&token_id),
             "Key path not registered as paymaster",
         );
 
         let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
 
         chain.paymasters.insert(
-            &key_path,
+            &token_id,
             &PaymasterConfiguration {
                 nonce,
-                key_path: key_path.clone(),
+                token_id: token_id.clone(),
                 minimum_available_balance: U256::from(balance.map_or(0, |v| v.0)).0,
             },
         );
     }
 
-    pub fn set_paymaster_balance(&mut self, chain_id: U64, key_path: String, balance: U128) {
+    pub fn set_paymaster_balance(&mut self, chain_id: U64, token_id: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
         self.assert_owner();
 
         let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-        let mut paymaster = chain.paymasters.get(&key_path).unwrap_or_reject();
+        let mut paymaster = chain.paymasters.get(&token_id).unwrap_or_reject();
         paymaster.minimum_available_balance = U256::from(balance.0).0;
-        chain.paymasters.insert(&key_path, &paymaster);
+        chain.paymasters.insert(&token_id, &paymaster);
     }
 
-    pub fn increase_paymaster_balance(&mut self, chain_id: U64, key_path: String, balance: U128) {
+    pub fn increase_paymaster_balance(&mut self, chain_id: U64, token_id: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
         self.assert_owner();
 
         let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-        let mut paymaster = chain.paymasters.get(&key_path).unwrap_or_reject();
+        let mut paymaster = chain.paymasters.get(&token_id).unwrap_or_reject();
         paymaster.minimum_available_balance =
             (U256(paymaster.minimum_available_balance) + U256::from(balance.0)).0;
-        chain.paymasters.insert(&key_path, &paymaster);
+        chain.paymasters.insert(&token_id, &paymaster);
     }
 
-    pub fn set_paymaster_nonce(&mut self, chain_id: U64, key_path: String, nonce: u32) {
+    pub fn set_paymaster_nonce(&mut self, chain_id: U64, token_id: String, nonce: u32) {
         #[cfg(not(feature = "debug"))]
         self.assert_owner();
 
         let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-        let mut paymaster = chain.paymasters.get(&key_path).unwrap_or_reject();
+        let mut paymaster = chain.paymasters.get(&token_id).unwrap_or_reject();
         paymaster.nonce = nonce;
-        chain.paymasters.insert(&key_path, &paymaster);
+        chain.paymasters.insert(&token_id, &paymaster);
     }
 
     /// Note: If a transaction sequence is _already_ pending signatures with
     /// the paymaster getting removed, this method will not prevent those
     /// payloads from getting signed.
-    pub fn remove_paymaster(&mut self, chain_id: U64, key_path: String) {
+    pub fn remove_paymaster(&mut self, chain_id: U64, token_id: String) {
         self.assert_owner();
         let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-        chain.paymasters.remove(&key_path).unwrap_or_reject();
+        chain.paymasters.remove(&token_id).unwrap_or_reject();
     }
 
     pub fn get_paymasters(&self, chain_id: U64) -> Vec<ViewPaymasterConfiguration> {
@@ -264,9 +264,9 @@ impl Contract {
             .iter()
             .map(|(_, p)| ViewPaymasterConfiguration {
                 nonce: p.nonce,
-                key_path: p.key_path.clone(),
+                token_id: p.token_id.clone(),
                 foreign_address: ForeignAddress::from_raw_public_key(
-                    self.paymaster_keys.get(&p.key_path).unwrap_or_reject(),
+                    self.paymaster_keys.get(&p.token_id).unwrap_or_reject(),
                 ),
                 minimum_available_balance: U256(p.minimum_available_balance).as_u128().into(),
             })
@@ -347,14 +347,14 @@ impl Contract {
     pub fn get_foreign_address_for(
         &self,
         account_id: AccountId,
-        key_path: String,
+        token_id: String,
     ) -> ForeignAddress {
         ForeignAddress::from_raw_public_key(
             &self
-                .user_keys
+                .user_chain_keys
                 .get(&account_id)
                 .unwrap_or_reject()
-                .get(&key_path)
+                .get(&token_id)
                 .unwrap_or_reject()
                 .public_key_bytes,
         )
