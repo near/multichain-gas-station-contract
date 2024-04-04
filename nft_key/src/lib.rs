@@ -63,10 +63,11 @@ impl NftKeyContract {
         id
     }
 
+    #[allow(clippy::ptr_arg)]
     pub fn get_approval(&self, path: &String, account: &AccountId) -> Option<&u32> {
         self.approvals
             .get(&path.parse().expect_or_reject("Invalid token ID"))
-            .and_then(|set| set.get(&account))
+            .and_then(|set| set.get(account))
     }
 }
 
