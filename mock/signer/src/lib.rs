@@ -11,6 +11,7 @@ use near_sdk::{
 pub fn construct_spoof_key(
     predecessor: &[u8],
     path: &[u8],
+    _key_version: &[u8],
 ) -> ethers_core::k256::ecdsa::SigningKey {
     let predecessor_hash = sha256([predecessor, b",", path].concat().as_slice());
     ethers_core::k256::ecdsa::SigningKey::from_bytes(predecessor_hash.as_slice().into()).unwrap()
@@ -22,9 +23,19 @@ struct Contract {}
 
 #[near_bindgen]
 impl SignerInterface for Contract {
-    fn sign(&mut self, payload: [u8; 32], path: &String) -> PromiseOrValue<MpcSignature> {
+    fn sign(
+        &mut self,
+        payload: [u8; 32],
+        path: &String,
+        key_version: u16,
+    ) -> PromiseOrValue<MpcSignature> {
         let predecessor = env::predecessor_account_id();
-        let signing_key = construct_spoof_key(predecessor.as_bytes(), path.as_bytes());
+        // This is unused, but needs to be in the sign signature.
+        let signing_key = construct_spoof_key(
+            predecessor.as_bytes(),
+            path.as_bytes(),
+            &key_version.to_be_bytes(),
+        );
         let (sig, recid) = signing_key.sign_prehash_recoverable(&payload).unwrap();
         PromiseOrValue::Value(MpcSignature::from_ecdsa_signature(sig, recid).unwrap())
     }
@@ -50,8 +61,11 @@ impl ChainKeySign for Contract {
     ) -> PromiseOrValue<ChainKeySignature> {
         require!(approval_id.is_none(), "Approvals not supported");
 
-        let signing_key =
-            construct_spoof_key(env::predecessor_account_id().as_bytes(), path.as_bytes());
+        let signing_key = construct_spoof_key(
+            env::predecessor_account_id().as_bytes(),
+            path.as_bytes(),
+            &[0u8, 1u8],
+        );
         let (sig, recid) = signing_key.sign_prehash_recoverable(&payload).unwrap();
 
         PromiseOrValue::Value(
