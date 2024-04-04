@@ -2,7 +2,7 @@ name: Rust NEAR Contract CI
 
 on:
   push:
-    branches: [ "master" ]
+    branches: ['master']
   pull_request:
 
 env:
@@ -28,16 +28,12 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           cargo install cargo-make
-          cargo install nextest
 
       - name: Lint & Clippy
         run: cargo make lint
 
-      - name: Build (Release)
+      - name: Build
         run: cargo make build
 
-      - name: Run Tests
-        run: cargo make test
-
-      - name: Run Nextest
+      - name: Tests
         run: cargo make nextest
