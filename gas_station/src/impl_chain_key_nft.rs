@@ -1,6 +1,6 @@
 use ethers_core::k256::EncodedPoint;
 use lib::{
-    chain_key::{ext_chain_key_token_sign, ChainKeyTokenApprovalReceiver},
+    chain_key::{ext_chain_key_token, ChainKeyTokenApprovalReceiver},
     Rejectable,
 };
 use near_sdk::{
@@ -38,7 +38,7 @@ impl Nep171Receiver for Contract {
         );
 
         PromiseOrValue::Promise(
-            ext_chain_key_token_sign::ext(env::predecessor_account_id())
+            ext_chain_key_token::ext(env::predecessor_account_id())
                 .ckt_public_key_for(token_id.clone(), None)
                 .then(
                     Self::ext(env::current_account_id()).nft_on_transfer_callback(
@@ -154,7 +154,7 @@ impl ChainKeyTokenApprovalReceiver for Contract {
         );
 
         PromiseOrValue::Promise(
-            ext_chain_key_token_sign::ext(predecessor)
+            ext_chain_key_token::ext(predecessor)
                 .ckt_public_key_for(token_id.clone(), None)
                 .then(
                     Self::ext(env::current_account_id()).ckt_on_approved_callback(

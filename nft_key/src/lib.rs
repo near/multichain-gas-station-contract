@@ -1,8 +1,5 @@
 use lib::{
-    chain_key::{
-        ext_chain_key_token_approval_receiver, ChainKeySignature, ChainKeyTokenApproval,
-        ChainKeyTokenSign,
-    },
+    chain_key::{ext_chain_key_token_approval_receiver, ChainKeyToken, ChainKeyTokenApproval},
     signer::{ext_signer, MpcSignature},
     Rejectable,
 };
@@ -26,7 +23,7 @@ enum StorageKey {
 #[derive(Debug, BorshSerialize, BorshDeserialize)]
 pub struct KeyData {
     pub approvals: UnorderedMap<AccountId, u32>,
-    pub mpc_key_version: u32,
+    pub key_version: u32,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PanicOnDefault, NonFungibleToken)]
@@ -83,12 +80,12 @@ impl NftKeyContract {
         #[serializer(borsh)] predecessor: AccountId,
         #[callback_result] result: Result<u32, PromiseError>,
     ) -> u32 {
-        let latest_key_version = result.unwrap();
+        let key_version = result.unwrap();
 
         self.key_data.insert(
             &id,
             &KeyData {
-                mpc_key_version: latest_key_version,
+                key_version,
                 approvals: UnorderedMap::new(StorageKey::ApprovalsFor(id)),
             },
         );
@@ -100,14 +97,14 @@ impl NftKeyContract {
 }
 
 #[near_bindgen]
-impl ChainKeyTokenSign for NftKeyContract {
+impl ChainKeyToken for NftKeyContract {
     fn ckt_sign_hash(
         &mut self,
         token_id: TokenId,
         path: Option<String>,
         payload: Vec<u8>,
         approval_id: Option<u32>,
-    ) -> PromiseOrValue<ChainKeySignature> {
+    ) -> PromiseOrValue<String> {
         let id = token_id.parse().expect_or_reject("Invalid token ID");
         let path = path.unwrap_or_default();
 
@@ -141,7 +138,7 @@ impl ChainKeyTokenSign for NftKeyContract {
                     Self::ext(env::current_account_id())
                         .with_static_gas(near_sdk::Gas::ONE_TERA * 3)
                         .with_unused_gas_weight(1)
-                        .ck_sign_hash_callback(),
+                        .sign_callback(),
                 ),
         )
     }
@@ -176,10 +173,10 @@ impl ChainKeyTokenSign for NftKeyContract {
 #[near_bindgen]
 impl NftKeyContract {
     #[private]
-    pub fn ck_sign_hash_callback(
+    pub fn sign_callback(
         &self,
         #[callback_result] result: Result<MpcSignature, PromiseError>,
-    ) -> ChainKeySignature {
+    ) -> String {
         let mpc_signature = result.unwrap();
         let ethers_signature: ethers_core::types::Signature =
             mpc_signature.try_into().unwrap_or_reject();

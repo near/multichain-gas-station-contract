@@ -7,7 +7,7 @@ use ethers_core::{
 };
 use lib::{
     asset::{AssetBalance, AssetId},
-    chain_key::ext_chain_key_token_sign,
+    chain_key::ext_chain_key_token,
     foreign_address::ForeignAddress,
     oracle::{ext_oracle, PriceData},
     Rejectable,
@@ -527,7 +527,7 @@ impl Contract {
         };
 
         #[allow(clippy::cast_possible_truncation)]
-        ext_chain_key_token_sign::ext(self.signer_contract_id.clone()) // TODO: Gas.
+        ext_chain_key_token::ext(self.signer_contract_id.clone()) // TODO: Gas.
             .ckt_sign_hash(
                 next_signature_request.token_id.clone(),
                 None,

@@ -1,5 +1,4 @@
 use lib::{
-    chain_key::*,
     kdf::sha256,
     signer::{MpcSignature, SignerInterface},
 };
@@ -41,10 +40,7 @@ impl SignerInterface for MockSignerContract {
         require!(key_version == 0, "Key version not supported");
         let predecessor = env::predecessor_account_id();
         // This is unused, but needs to be in the sign signature.
-        let signing_key = construct_spoof_key(
-            predecessor.as_bytes(),
-            path.as_bytes(),
-        );
+        let signing_key = construct_spoof_key(predecessor.as_bytes(), path.as_bytes());
         let (sig, recid) = signing_key.sign_prehash_recoverable(&payload).unwrap();
         PromiseOrValue::Value(MpcSignature::from_ecdsa_signature(sig, recid).unwrap())
     }
@@ -57,33 +53,5 @@ impl SignerInterface for MockSignerContract {
 
     fn latest_key_version(&self) -> u32 {
         0
-    }
-}
-
-#[near_bindgen]
-impl ChainKeySign for MockSignerContract {
-    fn ck_scheme_oid(&self) -> String {
-        "1.3.132.0.10".to_string()
-    }
-
-    fn ck_sign_hash(
-        &mut self,
-        path: String,
-        payload: Vec<u8>,
-    ) -> PromiseOrValue<ChainKeySignature> {
-        let signing_key = construct_spoof_key(
-            env::predecessor_account_id().as_bytes(),
-            path.as_bytes(),
-        );
-        let (sig, recid) = signing_key.sign_prehash_recoverable(&payload).unwrap();
-
-        PromiseOrValue::Value(
-            ethers_core::types::Signature {
-                r: sig.r().to_bytes().as_slice().into(),
-                s: sig.s().to_bytes().as_slice().into(),
-                v: recid.to_byte().into(),
-            }
-            .to_string(),
-        )
     }
 }
