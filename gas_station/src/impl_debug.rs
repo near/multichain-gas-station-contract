@@ -30,7 +30,7 @@ impl Contract {
     pub fn new_debug(
         signer_contract_id: AccountId,
         oracle_id: AccountId,
-        supported_assets_oracle_asset_ids: std::collections::HashMap<AssetId, String>,
+        supported_assets_oracle_asset_ids: Vec<(AssetId, String)>,
         expire_sequence_after_blocks: Option<U64>,
     ) -> Self {
         let mut contract = Self {

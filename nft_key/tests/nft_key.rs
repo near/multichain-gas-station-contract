@@ -202,9 +202,9 @@ async fn test_nft_key() {
         .unwrap()
         .unwrap();
 
-    println!("Approval succeeded.");
-    println!("Bob attempting to sign with token {token_1_id}...");
+    println!("Approval succeeded with ID {}", approval_id);
 
+    println!("Bob attempting to sign with token {token_1_id}...");
     let bob_approved_transaction = bob
         .call(nft_key.id(), "ckt_sign_hash")
         .args_json(json!({

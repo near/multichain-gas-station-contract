@@ -35,3 +35,10 @@ ENTRIES=$(near contract view-storage canhazgas.testnet all as-json network-confi
 JSON="{\"entries\": $ENTRIES}"
 near contract call-function as-transaction canhazgas.testnet clear_storage json-args "$JSON" prepaid-gas '300.0 Tgas' attached-deposit '0 NEAR' sign-as
 '''
+
+[tasks.lint]
+workspace = false
+clear = true
+script = """
+cargo fmt --check && cargo clippy --all-targets --verbose -- -D warnings
+"""
