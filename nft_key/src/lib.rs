@@ -6,9 +6,8 @@ use lib::{
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     collections::UnorderedMap,
-    env, near_bindgen, require,
-    serde_json::{self, json},
-    AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
+    env, near_bindgen, require, AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError,
+    PromiseOrValue,
 };
 use near_sdk_contract_tools::hook::Hook;
 #[allow(clippy::wildcard_imports)]
@@ -166,18 +165,32 @@ impl ChainKeyToken for NftKeyContract {
         let id: u32 = token_id.parse().expect_or_reject("Invalid token ID");
         let path = path.unwrap_or_default();
 
-        PromiseOrValue::Promise(
-            Promise::new(self.signer_contract_id.clone()).function_call(
-                "public_key_for".to_string(),
-                serde_json::to_vec(&json!({
-                    "account_id": env::current_account_id(),
-                    "path": format!("{id},{path}"),
-                }))
-                .unwrap_or_reject(),
-                0,
-                env::prepaid_gas() / 10,
-            ),
-        )
+        #[cfg(feature = "real-kdf")]
+        {
+            PromiseOrValue::Promise(
+                ext_signer::ext(self.signer_contract_id.clone())
+                    .public_key()
+                    .then(
+                        Self::ext(env::current_account_id()).ckt_public_key_for_callback(id, path),
+                    ),
+            )
+        }
+
+        #[cfg(not(feature = "real-kdf"))]
+        {
+            PromiseOrValue::Promise(
+                Promise::new(self.signer_contract_id.clone()).function_call(
+                    "public_key_for".to_string(),
+                    near_sdk::serde_json::to_vec(&near_sdk::serde_json::json!({
+                        "account_id": env::current_account_id(),
+                        "path": format!("{id},{path}"),
+                    }))
+                    .unwrap_or_reject(),
+                    0,
+                    env::prepaid_gas() / 10,
+                ),
+            )
+        }
     }
 
     fn ckt_scheme_oid(&self) -> String {
@@ -187,6 +200,24 @@ impl ChainKeyToken for NftKeyContract {
 
 #[near_bindgen]
 impl NftKeyContract {
+    #[cfg(feature = "real-kdf")]
+    #[private]
+    pub fn ckt_public_key_for_callback(
+        &self,
+        #[serializer(borsh)] token_id: u32,
+        #[serializer(borsh)] path: String,
+        #[callback_result] result: Result<near_sdk::PublicKey, PromiseError>,
+    ) -> String {
+        let mpc_public_key = result.unwrap();
+        let derived_public_key = lib::kdf::derive_public_key_for(
+            mpc_public_key,
+            &env::current_account_id(),
+            &format!("{token_id},{path}"),
+        )
+        .unwrap_or_reject();
+        derived_public_key.to_string()
+    }
+
     #[private]
     pub fn sign_callback(
         &self,

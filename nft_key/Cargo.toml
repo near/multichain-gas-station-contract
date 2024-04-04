@@ -16,3 +16,9 @@ tokio = "1.28"
 
 [lib]
 crate-type = ["cdylib"]
+
+[features]
+default = []
+
+# changes the KDF in ckt_public_key_for
+real-kdf = []
