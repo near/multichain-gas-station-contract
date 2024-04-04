@@ -65,12 +65,19 @@ impl NftKeyContract {
     }
 
     pub fn mint(&mut self) -> Promise {
+        let storage_usage_start = env::storage_usage();
         let id = self.generate_id();
         let predecessor = env::predecessor_account_id();
+        self.storage_balance_of(predecessor.clone())
+            .expect_or_reject("Predecessor has not registered for storage");
 
         ext_signer::ext(self.signer_contract_id.clone())
             .latest_key_version()
-            .then(Self::ext(env::current_account_id()).mint_callback(id, predecessor))
+            .then(Self::ext(env::current_account_id()).mint_callback(
+                id,
+                predecessor,
+                storage_usage_start,
+            ))
     }
 
     #[private]
@@ -78,6 +85,7 @@ impl NftKeyContract {
         &mut self,
         #[serializer(borsh)] id: u32,
         #[serializer(borsh)] predecessor: AccountId,
+        #[serializer(borsh)] storage_usage_start: u64,
         #[callback_result] result: Result<u32, PromiseError>,
     ) -> u32 {
         let key_version = result.unwrap();
@@ -89,7 +97,14 @@ impl NftKeyContract {
                 approvals: UnorderedMap::new(StorageKey::ApprovalsFor(id)),
             },
         );
-        self.mint_with_metadata(id.to_string(), predecessor, generate_token_metadata(id))
+        self.mint_with_metadata(
+            id.to_string(),
+            predecessor.clone(),
+            generate_token_metadata(id),
+        )
+        .unwrap_or_reject();
+
+        self.storage_accounting(&predecessor, storage_usage_start)
             .unwrap_or_reject();
 
         id
