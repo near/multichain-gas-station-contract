@@ -28,6 +28,7 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           cargo install cargo-make
+          cargo install cargo-nextest
 
       - name: Lint & Clippy
         run: cargo make lint
