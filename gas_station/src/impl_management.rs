@@ -4,7 +4,10 @@ use near_sdk::{
     json_types::{U128, U64},
     near_bindgen, require, AccountId, Promise,
 };
-use near_sdk_contract_tools::owner::{Owner, OwnerExternal};
+use near_sdk_contract_tools::{
+    owner::{Owner, OwnerExternal},
+    pause::Pause,
+};
 
 use crate::{
     chain_configuration::{ChainConfiguration, PaymasterConfiguration, ViewPaymasterConfiguration},
@@ -18,6 +21,16 @@ use lib::{asset::AssetId, foreign_address::ForeignAddress, oracle::PriceData, Re
 #[allow(clippy::needless_pass_by_value)]
 #[near_bindgen]
 impl Contract {
+    pub fn pause(&mut self) {
+        self.assert_owner();
+        <Self as Pause>::pause(self);
+    }
+
+    pub fn unpause(&mut self) {
+        self.assert_owner();
+        <Self as Pause>::unpause(self);
+    }
+
     pub fn get_expire_sequence_after_blocks(&self) -> U64 {
         self.expire_sequence_after_blocks.into()
     }
