@@ -1,12 +1,8 @@
-use std::str::FromStr;
-
 use ethers_core::types::U256;
 use near_sdk::{
-    env,
+    collections::TreeMap,
     json_types::{U128, U64},
-    near_bindgen, require,
-    store::Vector,
-    AccountId, Promise, PromiseError, PromiseOrValue,
+    near_bindgen, require, AccountId, Promise,
 };
 use near_sdk_contract_tools::owner::{Owner, OwnerExternal};
 
@@ -17,10 +13,7 @@ use crate::{
     valid_transaction_request::ValidTransactionRequest,
     Contract, ContractExt, Flags, GetForeignChain, PendingTransactionSequence, StorageKey,
 };
-use lib::{
-    asset::AssetId, foreign_address::ForeignAddress, kdf::get_mpc_address, oracle::PriceData,
-    signer::ext_signer, Rejectable,
-};
+use lib::{asset::AssetId, foreign_address::ForeignAddress, oracle::PriceData, Rejectable};
 
 #[allow(clippy::needless_pass_by_value)]
 #[near_bindgen]
@@ -38,57 +31,9 @@ impl Contract {
         &self.signer_contract_id
     }
 
-    /// Set the signer contract ID. Automatically refreshes the public key
-    /// unless `refresh` is `false`, in which case it requires a call to
-    /// [`Contract::refresh_signer_public_key`] afterwards.
-    pub fn set_signer_contract_id(
-        &mut self,
-        account_id: AccountId,
-        refresh: Option<bool>,
-    ) -> PromiseOrValue<()> {
+    pub fn set_signer_contract_id(&mut self, account_id: AccountId) {
         self.assert_owner();
-
-        if self.signer_contract_id != account_id {
-            self.signer_contract_id = account_id;
-            self.signer_contract_public_key = None;
-
-            if refresh.unwrap_or(true) {
-                return PromiseOrValue::Promise(
-                    ext_signer::ext(self.signer_contract_id.clone())
-                        .public_key()
-                        .then(
-                            Self::ext(env::current_account_id())
-                                .refresh_signer_public_key_callback(),
-                        ),
-                );
-            }
-        }
-
-        PromiseOrValue::Value(())
-    }
-
-    /// Refresh the public key from the signer contract.
-    pub fn refresh_signer_public_key(&mut self) -> Promise {
-        self.assert_owner();
-
-        ext_signer::ext(self.signer_contract_id.clone())
-            .public_key()
-            .then(Self::ext(env::current_account_id()).refresh_signer_public_key_callback())
-    }
-
-    #[private]
-    pub fn refresh_signer_public_key_callback(
-        &mut self,
-        #[callback_result] public_key: Result<near_sdk::PublicKey, PromiseError>,
-    ) {
-        let public_key = public_key
-            .ok()
-            .expect_or_reject("Failed to load signer public key from the signer contract");
-        self.signer_contract_public_key = Some(public_key);
-    }
-
-    pub fn get_signer_public_key(&self) -> Option<&near_sdk::PublicKey> {
-        self.signer_contract_public_key.as_ref()
+        self.signer_contract_id = account_id;
     }
 
     pub fn get_flags(&self) -> &Flags {
@@ -100,14 +45,14 @@ impl Contract {
         self.flags = flags;
     }
 
-    pub fn get_receiver_whitelist(&self) -> Vec<&ForeignAddress> {
+    pub fn get_receiver_whitelist(&self) -> Vec<ForeignAddress> {
         self.receiver_whitelist.iter().collect()
     }
 
     pub fn add_to_receiver_whitelist(&mut self, addresses: Vec<ForeignAddress>) {
         self.assert_owner();
         for address in addresses {
-            self.receiver_whitelist.insert(address);
+            self.receiver_whitelist.insert(&address);
         }
     }
 
@@ -123,14 +68,14 @@ impl Contract {
         self.receiver_whitelist.clear();
     }
 
-    pub fn get_sender_whitelist(&self) -> Vec<&AccountId> {
+    pub fn get_sender_whitelist(&self) -> Vec<AccountId> {
         self.sender_whitelist.iter().collect()
     }
 
     pub fn add_to_sender_whitelist(&mut self, addresses: Vec<AccountId>) {
         self.assert_owner();
         for address in addresses {
-            self.sender_whitelist.insert(address);
+            self.sender_whitelist.insert(&address);
         }
     }
 
@@ -156,13 +101,13 @@ impl Contract {
         self.assert_owner();
 
         self.foreign_chains.insert(
-            chain_id.0,
-            ChainConfiguration {
-                next_paymaster: 0,
+            &chain_id.0,
+            &ChainConfiguration {
+                next_paymaster: String::new(),
                 oracle_asset_id,
                 transfer_gas: U256::from(transfer_gas.0).0,
                 fee_rate: (fee_rate.0.into(), fee_rate.1.into()),
-                paymasters: Vector::new(StorageKey::Paymasters(chain_id.0)),
+                paymasters: TreeMap::new(StorageKey::Paymasters(chain_id.0)),
             },
         );
     }
@@ -170,20 +115,22 @@ impl Contract {
     pub fn set_foreign_chain_oracle_asset_id(&mut self, chain_id: U64, oracle_asset_id: String) {
         self.assert_owner();
 
-        let config = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-        config.oracle_asset_id = oracle_asset_id;
+        self.with_mut_chain(chain_id.0, |config| {
+            config.oracle_asset_id = oracle_asset_id;
+        });
     }
 
     pub fn set_foreign_chain_transfer_gas(&mut self, chain_id: U64, transfer_gas: U128) {
         self.assert_owner();
 
-        let config = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-        config.transfer_gas = U256::from(transfer_gas.0).0;
+        self.with_mut_chain(chain_id.0, |config| {
+            config.transfer_gas = U256::from(transfer_gas.0).0;
+        });
     }
 
     pub fn remove_foreign_chain(&mut self, chain_id: U64) {
         self.assert_owner();
-        if let Some((_, mut config)) = self.foreign_chains.remove_entry(&chain_id.0) {
+        if let Some(mut config) = self.foreign_chains.remove(&chain_id.0) {
             config.paymasters.clear();
         }
     }
@@ -192,8 +139,8 @@ impl Contract {
         self.foreign_chains
             .iter()
             .map(|(chain_id, config)| GetForeignChain {
-                chain_id: (*chain_id).into(),
-                oracle_asset_id: config.oracle_asset_id.clone(),
+                chain_id: chain_id.into(),
+                oracle_asset_id: config.oracle_asset_id,
             })
             .collect()
     }
@@ -202,73 +149,71 @@ impl Contract {
         &mut self,
         chain_id: U64,
         nonce: u32,
-        key_path: String,
+        token_id: String,
         balance: Option<near_sdk::json_types::U128>,
-    ) -> u32 {
+    ) {
         self.assert_owner();
 
         require!(
-            AccountId::from_str(&key_path).is_err(),
-            "Paymaster key path must not be a valid account id",
+            self.paymaster_keys.get(&token_id).is_some(),
+            "Token ID is not registered as paymaster",
         );
 
-        let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-
-        let index = chain.paymasters.len();
-
-        chain.paymasters.push(PaymasterConfiguration {
-            nonce,
-            key_path,
-            minimum_available_balance: U256::from(balance.map_or(0, |v| v.0)).0,
+        self.with_mut_chain(chain_id.0, |chain_config| {
+            chain_config.paymasters.insert(
+                &token_id,
+                &PaymasterConfiguration {
+                    nonce,
+                    token_id: token_id.clone(),
+                    minimum_available_balance: U256::from(balance.map_or(0, |v| v.0)).0,
+                },
+            );
         });
-
-        index
     }
 
-    pub fn set_paymaster_balance(&mut self, chain_id: U64, index: u32, balance: U128) {
+    pub fn set_paymaster_balance(&mut self, chain_id: U64, token_id: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
         self.assert_owner();
 
-        let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-        let paymaster = chain.get_paymaster_mut(index).unwrap_or_reject();
-
-        paymaster.minimum_available_balance = U256::from(balance.0).0;
+        self.with_mut_chain(chain_id.0, |chain_config| {
+            let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
+            paymaster.minimum_available_balance = U256::from(balance.0).0;
+            chain_config.paymasters.insert(&token_id, &paymaster);
+        });
     }
 
-    pub fn increase_paymaster_balance(&mut self, chain_id: U64, index: u32, balance: U128) {
+    pub fn increase_paymaster_balance(&mut self, chain_id: U64, token_id: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
         self.assert_owner();
 
-        let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-        let paymaster = chain.get_paymaster_mut(index).unwrap_or_reject();
-
-        paymaster.minimum_available_balance =
-            (U256(paymaster.minimum_available_balance) + U256::from(balance.0)).0;
+        self.with_mut_chain(chain_id.0, |chain_config| {
+            let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
+            paymaster.minimum_available_balance =
+                (U256(paymaster.minimum_available_balance) + U256::from(balance.0)).0;
+            chain_config.paymasters.insert(&token_id, &paymaster);
+        });
     }
 
-    pub fn set_paymaster_nonce(&mut self, chain_id: U64, index: u32, nonce: u32) {
+    pub fn set_paymaster_nonce(&mut self, chain_id: U64, token_id: String, nonce: u32) {
         #[cfg(not(feature = "debug"))]
         self.assert_owner();
 
-        let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
-        let paymaster = chain.get_paymaster_mut(index).unwrap_or_reject();
-
-        paymaster.nonce = nonce;
+        self.with_mut_chain(chain_id.0, |chain_config| {
+            let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
+            paymaster.nonce = nonce;
+            chain_config.paymasters.insert(&token_id, &paymaster);
+        });
     }
 
     /// Note: If a transaction sequence is _already_ pending signatures with
     /// the paymaster getting removed, this method will not prevent those
     /// payloads from getting signed.
-    pub fn remove_paymaster(&mut self, chain_id: U64, index: u32) {
+    pub fn remove_paymaster(&mut self, chain_id: U64, token_id: String) {
         self.assert_owner();
-        let chain = self.get_chain_mut(chain_id.0).unwrap_or_reject();
 
-        if index < chain.paymasters.len() {
-            chain.paymasters.swap_remove(index);
-            // resetting chain.next_paymaster is not necessary, since overflow is handled in [`ForeignChainConfiguration::next_paymaster`] function.
-        } else {
-            env::panic_str("Invalid index");
-        }
+        self.with_mut_chain(chain_id.0, |chain_config| {
+            chain_config.paymasters.remove(&token_id).unwrap_or_reject();
+        });
     }
 
     pub fn get_paymasters(&self, chain_id: U64) -> Vec<ViewPaymasterConfiguration> {
@@ -276,15 +221,12 @@ impl Contract {
             .unwrap_or_reject()
             .paymasters
             .iter()
-            .map(|p| ViewPaymasterConfiguration {
+            .map(|(_, p)| ViewPaymasterConfiguration {
                 nonce: p.nonce,
-                key_path: p.key_path.clone(),
-                foreign_address: get_mpc_address(
-                    self.signer_contract_public_key.clone().unwrap(),
-                    &env::current_account_id(),
-                    &p.key_path,
-                )
-                .unwrap(),
+                token_id: p.token_id.clone(),
+                foreign_address: ForeignAddress::from_raw_public_key(
+                    self.paymaster_keys.get(&p.token_id).unwrap_or_reject(),
+                ),
                 minimum_available_balance: U256(p.minimum_available_balance).as_u128().into(),
             })
             .collect()
@@ -295,10 +237,10 @@ impl Contract {
         account_id: Option<AccountId>,
         offset: Option<u32>,
         limit: Option<u32>,
-    ) -> std::collections::HashMap<String, &PendingTransactionSequence> {
+    ) -> std::collections::HashMap<String, PendingTransactionSequence> {
         let mut v: Vec<_> = self.pending_transaction_sequences.iter().collect();
 
-        v.sort_by_cached_key(|&(id, _)| *id);
+        v.sort_by_cached_key(|&(id, _)| id);
 
         v.into_iter()
             .filter(|(_, tx)| {
@@ -312,7 +254,7 @@ impl Contract {
             .collect()
     }
 
-    pub fn get_pending_transaction_sequence(&self, id: U64) -> Option<&PendingTransactionSequence> {
+    pub fn get_pending_transaction_sequence(&self, id: U64) -> Option<PendingTransactionSequence> {
         self.pending_transaction_sequences.get(&id.0)
     }
 
@@ -321,13 +263,13 @@ impl Contract {
         block_height: U64,
         offset: Option<u32>,
         limit: Option<u32>,
-    ) -> Vec<&TransactionSequenceSigned> {
+    ) -> Vec<TransactionSequenceSigned> {
         self.signed_transaction_sequences
             .iter()
             .skip_while(|s| s.block_height < block_height.0)
             .skip(offset.map_or(0, |o| o as usize))
             .take(limit.map_or(usize::MAX, |l| l as usize))
-            .map(|s| &s.event)
+            .map(|s| s.event)
             .collect()
     }
 
@@ -339,9 +281,9 @@ impl Contract {
     ) -> Promise {
         near_sdk::assert_one_yocto();
         self.assert_owner();
-        let fees = self
+        let mut fees = self
             .collected_fees
-            .get_mut(&asset_id)
+            .get(&asset_id)
             .expect_or_reject("No fee entry for provided asset ID");
 
         let amount = amount.unwrap_or(U128(fees.0));
@@ -351,23 +293,31 @@ impl Contract {
             .checked_sub(amount.0)
             .expect_or_reject("Not enough fees to withdraw");
 
+        self.collected_fees.insert(&asset_id, &fees);
+
         asset_id.transfer(
             receiver_id.unwrap_or_else(|| self.own_get_owner().unwrap()),
             amount,
         )
     }
 
-    pub fn get_collected_fees(&self) -> std::collections::HashMap<&AssetId, &U128> {
+    pub fn get_collected_fees(&self) -> std::collections::HashMap<AssetId, U128> {
         self.collected_fees.iter().collect()
     }
 
-    pub fn get_foreign_address_for(&self, account_id: AccountId) -> ForeignAddress {
-        get_mpc_address(
-            self.signer_contract_public_key.clone().unwrap(),
-            &env::current_account_id(),
-            account_id.as_str(),
+    pub fn get_foreign_address_for(
+        &self,
+        account_id: AccountId,
+        token_id: String,
+    ) -> ForeignAddress {
+        ForeignAddress::from_raw_public_key(
+            self.user_chain_keys
+                .get(&account_id)
+                .unwrap_or_reject()
+                .get(&token_id)
+                .unwrap_or_reject()
+                .public_key_bytes,
         )
-        .unwrap()
     }
 
     pub fn estimate_gas_cost(
@@ -393,7 +343,7 @@ impl Contract {
             .expect_or_reject("Unsupported deposit asset");
 
         foreign_chain_configuration
-            .foreign_token_price(oracle_asset_id, &price_data, request_tokens_for_gas)
+            .foreign_token_price(&oracle_asset_id, &price_data, request_tokens_for_gas)
             .into()
     }
 }

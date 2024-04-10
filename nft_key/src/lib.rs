@@ -1,15 +1,13 @@
 use lib::{
-    chain_key::{
-        ext_chain_key_approved, ext_chain_key_sign, ChainKeyApproval, ChainKeySign,
-        ChainKeySignature,
-    },
+    chain_key::{ext_chain_key_token_approval_receiver, ChainKeyToken, ChainKeyTokenApproval},
+    signer::{ext_signer, MpcSignature},
     Rejectable,
 };
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    env, near_bindgen, require,
-    store::UnorderedMap,
-    AccountId, BorshStorageKey, PanicOnDefault, PromiseOrValue,
+    collections::UnorderedMap,
+    env, near_bindgen, require, AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError,
+    PromiseOrValue,
 };
 use near_sdk_contract_tools::hook::Hook;
 #[allow(clippy::wildcard_imports)]
@@ -17,28 +15,46 @@ use near_sdk_contract_tools::nft::*;
 
 #[derive(Debug, BorshSerialize, BorshStorageKey)]
 enum StorageKey {
-    Approvals,
+    KeyData,
     ApprovalsFor(u32),
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Debug, PanicOnDefault, Nep171)]
-#[nep171(transfer_hook = "Self", burn_hook = "Self")]
+#[derive(Debug, BorshSerialize, BorshDeserialize)]
+pub struct KeyData {
+    pub approvals: UnorderedMap<AccountId, u32>,
+    pub key_version: u32,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, PanicOnDefault, NonFungibleToken)]
+#[non_fungible_token(transfer_hook = "Self", burn_hook = "Self")]
 #[near_bindgen]
 pub struct NftKeyContract {
     pub next_id: u32,
     pub signer_contract_id: AccountId,
-    pub approvals: UnorderedMap<u32, UnorderedMap<AccountId, u32>>,
+    pub key_data: UnorderedMap<u32, KeyData>,
+}
+
+fn generate_token_metadata(id: u32) -> TokenMetadata {
+    TokenMetadata::new().title(format!("Chain Key Token #{id}"))
 }
 
 #[near_bindgen]
 impl NftKeyContract {
     #[init]
     pub fn new(signer_contract_id: AccountId) -> Self {
-        Self {
+        let mut contract = Self {
             next_id: 0,
             signer_contract_id,
-            approvals: UnorderedMap::new(StorageKey::Approvals),
-        }
+            key_data: UnorderedMap::new(StorageKey::KeyData),
+        };
+
+        contract.set_contract_metadata(ContractMetadata::new(
+            "Chain Key Token".to_string(),
+            "CKT".to_string(),
+            None,
+        ));
+
+        contract
     }
 
     fn generate_id(&mut self) -> u32 {
@@ -47,72 +63,202 @@ impl NftKeyContract {
         id
     }
 
-    pub fn mint(&mut self) -> String {
-        let id = self.generate_id().to_string();
+    pub fn mint(&mut self) -> Promise {
+        let storage_usage_start = env::storage_usage();
+        let id = self.generate_id();
+        let predecessor = env::predecessor_account_id();
+        self.storage_balance_of(predecessor.clone())
+            .expect_or_reject("Predecessor has not registered for storage");
 
-        Nep171Controller::mint(
-            self,
-            &Nep171Mint {
-                token_ids: std::array::from_ref(&id),
-                receiver_id: &env::predecessor_account_id(),
-                memo: None,
-            },
-        )
-        .expect_or_reject("Failed to mint new key token");
-
-        id
+        ext_signer::ext(self.signer_contract_id.clone())
+            .latest_key_version()
+            .then(Self::ext(env::current_account_id()).mint_callback(
+                id,
+                predecessor,
+                storage_usage_start,
+            ))
     }
 
-    #[allow(clippy::ptr_arg)]
-    pub fn get_approval(&self, path: &String, account: &AccountId) -> Option<&u32> {
-        self.approvals
-            .get(&path.parse().expect_or_reject("Invalid token ID"))
-            .and_then(|set| set.get(account))
+    #[private]
+    pub fn mint_callback(
+        &mut self,
+        #[serializer(borsh)] id: u32,
+        #[serializer(borsh)] predecessor: AccountId,
+        #[serializer(borsh)] storage_usage_start: u64,
+        #[callback_result] result: Result<u32, PromiseError>,
+    ) -> u32 {
+        let key_version = result.unwrap();
+
+        self.key_data.insert(
+            &id,
+            &KeyData {
+                key_version,
+                approvals: UnorderedMap::new(StorageKey::ApprovalsFor(id)),
+            },
+        );
+        self.mint_with_metadata(
+            id.to_string(),
+            predecessor.clone(),
+            generate_token_metadata(id),
+        )
+        .unwrap_or_reject();
+
+        self.storage_accounting(&predecessor, storage_usage_start)
+            .unwrap_or_reject();
+
+        id
     }
 }
 
 #[near_bindgen]
-impl ChainKeySign for NftKeyContract {
-    fn ck_sign_hash(
+impl ChainKeyToken for NftKeyContract {
+    fn ckt_sign_hash(
         &mut self,
-        path: String,
+        token_id: TokenId,
+        path: Option<String>,
         payload: Vec<u8>,
         approval_id: Option<u32>,
-    ) -> PromiseOrValue<ChainKeySignature> {
-        let expected_owner_id = env::predecessor_account_id();
-        let actual_owner_id = self.token_owner(&path);
+    ) -> PromiseOrValue<String> {
+        let id = token_id.parse().expect_or_reject("Invalid token ID");
+        let path = path.unwrap_or_default();
 
-        let is_approved = self
-            .get_approval(&path, &expected_owner_id)
-            .zip(approval_id)
-            .map_or(false, |(id, approval_id)| id == &approval_id);
+        let expected_owner_id = env::predecessor_account_id();
+        let actual_owner_id = self.token_owner(&token_id.to_string());
+
+        let key_data = self
+            .key_data
+            .get(&id)
+            .expect_or_reject("Missing data for key");
 
         require!(
-            Some(&expected_owner_id) == actual_owner_id.as_ref() || is_approved,
+            Some(&expected_owner_id) == actual_owner_id.as_ref()
+                || key_data
+                    .approvals
+                    .get(&env::predecessor_account_id())
+                    .zip(approval_id)
+                    .map_or(false, |(actual, expected)| actual == expected),
             "Unauthorized",
         );
 
         PromiseOrValue::Promise(
-            ext_chain_key_sign::ext(self.signer_contract_id.clone())
-                .ck_sign_hash(path, payload, None),
+            ext_signer::ext(self.signer_contract_id.clone())
+                .with_unused_gas_weight(10)
+                .sign(
+                    payload.try_into().unwrap(),
+                    &format!("{token_id},{path}"),
+                    0,
+                )
+                .then(
+                    Self::ext(env::current_account_id())
+                        .with_static_gas(near_sdk::Gas::ONE_TERA * 3)
+                        .with_unused_gas_weight(1)
+                        .sign_callback(),
+                ),
         )
     }
 
-    fn ck_scheme_oid(&self) -> String {
+    fn ckt_public_key_for(
+        &mut self,
+        token_id: TokenId,
+        path: Option<String>,
+    ) -> PromiseOrValue<String> {
+        let id: u32 = token_id.parse().expect_or_reject("Invalid token ID");
+        let path = path.unwrap_or_default();
+
+        #[cfg(feature = "real-kdf")]
+        {
+            PromiseOrValue::Promise(
+                ext_signer::ext(self.signer_contract_id.clone())
+                    .public_key()
+                    .then(
+                        Self::ext(env::current_account_id()).ckt_public_key_for_callback(id, path),
+                    ),
+            )
+        }
+
+        #[cfg(not(feature = "real-kdf"))]
+        {
+            PromiseOrValue::Promise(
+                Promise::new(self.signer_contract_id.clone()).function_call(
+                    "public_key_for".to_string(),
+                    near_sdk::serde_json::to_vec(&near_sdk::serde_json::json!({
+                        "account_id": env::current_account_id(),
+                        "path": format!("{id},{path}"),
+                    }))
+                    .unwrap_or_reject(),
+                    0,
+                    env::prepaid_gas() / 10,
+                ),
+            )
+        }
+    }
+
+    fn ckt_scheme_oid(&self) -> String {
         "1.3.132.0.10".to_string()
     }
 }
 
 #[near_bindgen]
-impl ChainKeyApproval for NftKeyContract {
-    fn ck_approve(
+impl NftKeyContract {
+    #[cfg(feature = "real-kdf")]
+    #[private]
+    pub fn ckt_public_key_for_callback(
+        &self,
+        #[serializer(borsh)] token_id: u32,
+        #[serializer(borsh)] path: String,
+        #[callback_result] result: Result<near_sdk::PublicKey, PromiseError>,
+    ) -> String {
+        let mpc_public_key = result.unwrap();
+        let derived_public_key = lib::kdf::derive_public_key_for(
+            mpc_public_key,
+            &env::current_account_id(),
+            &format!("{token_id},{path}"),
+        )
+        .unwrap_or_reject();
+        derived_public_key.to_string()
+    }
+
+    #[private]
+    pub fn sign_callback(
+        &self,
+        #[callback_result] result: Result<MpcSignature, PromiseError>,
+    ) -> String {
+        let mpc_signature = result.unwrap();
+        let ethers_signature: ethers_core::types::Signature =
+            mpc_signature.try_into().unwrap_or_reject();
+        ethers_signature.to_string()
+    }
+
+    #[private]
+    pub fn ck_approve_callback(
         &mut self,
-        path: String,
+        #[serializer(borsh)] token_id: u32,
+        #[serializer(borsh)] account_id: AccountId,
+        #[serializer(borsh)] approval_id: u32,
+        #[callback_result] result: Result<(), PromiseError>,
+    ) -> Option<u32> {
+        if result.is_ok() {
+            Some(approval_id)
+        } else {
+            let mut key_data = self.key_data.get(&token_id).unwrap_or_reject();
+            let ejected_id = key_data.approvals.remove(&account_id);
+            self.key_data.insert(&token_id, &key_data);
+            require!(ejected_id == Some(approval_id), "Inconsistent approval ID");
+            None
+        }
+    }
+}
+
+#[near_bindgen]
+impl ChainKeyTokenApproval for NftKeyContract {
+    fn ckt_approve(
+        &mut self,
+        token_id: TokenId,
         account_id: AccountId,
         msg: Option<String>,
-    ) -> PromiseOrValue<()> {
-        let id: u32 = path.parse().expect_or_reject("Invalid token ID");
-        let actual_owner = Nep171Controller::token_owner(self, &path);
+    ) -> PromiseOrValue<Option<u32>> {
+        let id = token_id.parse().expect_or_reject("Invalid token ID");
+        let actual_owner = Nep171Controller::token_owner(self, &token_id);
         let predecessor = env::predecessor_account_id();
         require!(
             actual_owner.as_ref() == Some(&predecessor),
@@ -121,76 +267,81 @@ impl ChainKeyApproval for NftKeyContract {
 
         let approval_id = self.generate_id();
 
-        self.approvals
-            .entry(id)
-            .or_insert_with(|| UnorderedMap::new(StorageKey::ApprovalsFor(id)))
-            .insert(account_id.clone(), approval_id);
+        let mut key_data = self
+            .key_data
+            .get(&id)
+            .expect_or_reject("Missing data for key");
+        key_data.approvals.insert(&account_id, &approval_id);
+        self.key_data.insert(&id, &key_data);
 
-        msg.map_or(PromiseOrValue::Value(()), |msg| {
-            PromiseOrValue::Promise(ext_chain_key_approved::ext(account_id).ck_on_approved(
-                predecessor,
-                path,
-                approval_id,
-                msg,
-            ))
+        msg.map_or(PromiseOrValue::Value(Some(approval_id)), |msg| {
+            PromiseOrValue::Promise(
+                ext_chain_key_token_approval_receiver::ext(account_id).ckt_on_approved(
+                    predecessor,
+                    token_id,
+                    approval_id,
+                    msg,
+                ),
+            )
         })
     }
 
-    fn ck_revoke(
+    fn ckt_revoke(
         &mut self,
-        path: String,
+        token_id: TokenId,
         account_id: AccountId,
         msg: Option<String>,
     ) -> PromiseOrValue<()> {
-        let id: u32 = path.parse().expect_or_reject("Invalid token ID");
-        let actual_owner = Nep171Controller::token_owner(self, &path);
+        let id: u32 = token_id.parse().expect_or_reject("Invalid token ID");
+        let actual_owner = Nep171Controller::token_owner(self, &token_id);
         let predecessor = env::predecessor_account_id();
         require!(actual_owner.as_ref() == Some(&predecessor), "Unauthorized");
 
-        let near_sdk::store::unordered_map::Entry::Occupied(mut entry) = self.approvals.entry(id)
-        else {
+        let Some(mut key_data) = self.key_data.get(&id) else {
             return PromiseOrValue::Value(());
         };
 
-        let Some(revoked_approval_id) = entry.get_mut().remove(&account_id) else {
+        let Some(revoked_approval_id) = key_data.approvals.remove(&account_id) else {
             return PromiseOrValue::Value(());
         };
+
+        self.key_data.insert(&id, &key_data);
 
         msg.map_or(PromiseOrValue::Value(()), |msg| {
-            PromiseOrValue::Promise(ext_chain_key_approved::ext(account_id).ck_on_revoked(
-                predecessor,
-                path,
-                revoked_approval_id,
-                msg,
-            ))
+            PromiseOrValue::Promise(
+                ext_chain_key_token_approval_receiver::ext(account_id).ckt_on_revoked(
+                    predecessor,
+                    token_id,
+                    revoked_approval_id,
+                    msg,
+                ),
+            )
         })
     }
 
-    fn ck_revoke_all(&mut self, path: String) -> u32 {
-        let id: u32 = path.parse().expect_or_reject("Invalid token ID");
-        let actual_owner = Nep171Controller::token_owner(self, &path);
+    fn ckt_revoke_all(&mut self, token_id: TokenId) -> near_sdk::json_types::U64 {
+        let id: u32 = token_id.parse().expect_or_reject("Invalid token ID");
+        let actual_owner = Nep171Controller::token_owner(self, &token_id);
         let predecessor = env::predecessor_account_id();
         require!(actual_owner.as_ref() == Some(&predecessor), "Unauthorized");
 
-        let near_sdk::store::unordered_map::Entry::Occupied(mut entry) = self.approvals.entry(id)
-        else {
-            return 0;
+        let Some(mut key_data) = self.key_data.get(&id) else {
+            return 0.into();
         };
 
-        let set = entry.get_mut();
-        let len = set.len();
-        set.clear();
+        let len = key_data.approvals.len();
+        key_data.approvals.clear();
+        self.key_data.insert(&id, &key_data);
 
-        len
+        len.into()
     }
 
-    fn ck_approval_id_for(&self, path: String, account_id: AccountId) -> Option<u32> {
-        let id: u32 = path.parse().expect_or_reject("Invalid token ID");
+    fn ckt_approval_id_for(&self, token_id: TokenId, account_id: AccountId) -> Option<u32> {
+        let id: u32 = token_id.parse().expect_or_reject("Invalid token ID");
 
-        self.approvals
+        self.key_data
             .get(&id)
-            .and_then(|approvals| approvals.get(&account_id))
-            .copied()
+            .and_then(|key_data| key_data.approvals.get(&account_id))
     }
 }
 
@@ -200,7 +351,7 @@ impl Hook<NftKeyContract, Nep171Transfer<'_>> for NftKeyContract {
         transfer: &Nep171Transfer<'_>,
         f: impl FnOnce(&mut NftKeyContract) -> R,
     ) -> R {
-        contract.ck_revoke_all(transfer.token_id.clone());
+        contract.ckt_revoke_all(transfer.token_id.clone());
         f(contract)
     }
 }
@@ -212,7 +363,7 @@ impl Hook<NftKeyContract, Nep171Burn<'_>> for NftKeyContract {
         f: impl FnOnce(&mut NftKeyContract) -> R,
     ) -> R {
         for token_id in burn.token_ids.iter() {
-            contract.ck_revoke_all(token_id.clone());
+            contract.ckt_revoke_all(token_id.clone());
         }
         f(contract)
     }

@@ -5,7 +5,7 @@ use near_sdk::{
 };
 use schemars::JsonSchema;
 
-use crate::valid_transaction_request::ValidTransactionRequest;
+use crate::{valid_transaction_request::ValidTransactionRequest, ChainKeyAuthorization};
 
 #[derive(
     Serialize,
@@ -82,20 +82,23 @@ pub enum Status {
 #[serde(crate = "near_sdk::serde")]
 pub struct SignatureRequest {
     pub status: Status,
-    pub key_path: String,
+    pub token_id: String,
+    pub authorization: ChainKeyAuthorization,
     pub is_paymaster: bool,
     pub transaction: ValidTransactionRequest,
 }
 
 impl SignatureRequest {
     pub fn new(
-        key_path: &impl ToString,
+        token_id: &impl ToString,
+        authorization: ChainKeyAuthorization,
         transaction: ValidTransactionRequest,
         is_paymaster: bool,
     ) -> Self {
         Self {
             status: Status::Pending,
-            key_path: key_path.to_string(),
+            token_id: token_id.to_string(),
+            authorization,
             is_paymaster,
             transaction,
         }

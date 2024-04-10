@@ -5,9 +5,10 @@ edition = "2021"
 publish = false
 
 [dependencies]
+ethers-core.workspace = true
+lib = { path = "../lib" }
 near-sdk.workspace = true
 near-sdk-contract-tools.workspace = true
-lib = { path = "../lib" }
 
 [dev-dependencies]
 near-workspaces = { version = "0.10", features = ["unstable"] }
@@ -15,3 +16,9 @@ tokio = "1.28"
 
 [lib]
 crate-type = ["cdylib"]
+
+[features]
+default = []
+
+# changes the KDF in ckt_public_key_for
+real-kdf = []

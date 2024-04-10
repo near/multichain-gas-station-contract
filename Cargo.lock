@@ -1522,14 +1522,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "governor"
-version = "0.1.0"
-dependencies = [
- "lib",
- "near-sdk",
-]
-
-[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2564,6 +2556,7 @@ checksum = "e4a24736216ec316047a1fc4252e27dabb04218aa4a3f37c6e7ddbf1f9782b54"
 name = "nft-key"
 version = "0.1.0"
 dependencies = [
+ "ethers-core",
  "lib",
  "near-sdk",
  "near-sdk-contract-tools",

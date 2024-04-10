@@ -18,14 +18,19 @@ impl Nep141Receiver for Contract {
 
         let asset_is_supported = self
             .supported_assets_oracle_asset_ids
-            .contains_key(&asset_id);
+            .get(&asset_id)
+            .is_some();
 
         if !asset_is_supported {
             // Unknown assets: ignore.
             return PromiseOrValue::Value(0.into());
         }
 
-        let args = if let Ok(args) =
+        let Nep141ReceiverCreateTransactionArgs {
+            token_id,
+            transaction_rlp_hex,
+            use_paymaster,
+        } = if let Ok(args) =
             near_sdk::serde_json::from_str::<Nep141ReceiverCreateTransactionArgs>(&msg)
         {
             args
@@ -34,9 +39,10 @@ impl Nep141Receiver for Contract {
         };
 
         let creation_promise_or_value = self.create_transaction_inner(
+            token_id,
             sender_id,
-            args.transaction_rlp_hex,
-            args.use_paymaster,
+            transaction_rlp_hex,
+            use_paymaster,
             AssetBalance { asset_id, amount },
         );
 

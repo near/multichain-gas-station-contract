@@ -12,6 +12,17 @@ use schemars::JsonSchema;
 )]
 pub struct ForeignAddress(pub [u8; 20]);
 
+impl ForeignAddress {
+    /// Creates a new [`ForeignAddress`] from the provided public key bytes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if provided `key` is not a valid public key.
+    pub fn from_raw_public_key(key_bytes: impl AsRef<[u8]>) -> Self {
+        ethers_core::utils::raw_public_key_to_address(&key_bytes.as_ref()[1..]).into()
+    }
+}
+
 impl near_sdk::serde::Serialize for ForeignAddress {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
