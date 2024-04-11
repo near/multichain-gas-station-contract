@@ -9,7 +9,7 @@ use near_sdk::{
 use near_sdk_contract_tools::owner::Owner;
 
 use crate::{Contract, ContractExt, Flags, StorageKey, DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS};
-use lib::asset::AssetId;
+use lib::{asset::AssetId, oracle::decode_pyth_price_id};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
@@ -53,9 +53,11 @@ impl Contract {
             collected_fees: UnorderedMap::new(StorageKey::CollectedFees),
         };
 
-        contract
-            .supported_assets_oracle_asset_ids
-            .extend(supported_assets_oracle_asset_ids);
+        contract.supported_assets_oracle_asset_ids.extend(
+            supported_assets_oracle_asset_ids
+                .into_iter()
+                .map(|(a, s)| (a, decode_pyth_price_id(&s))),
+        );
 
         Owner::update_owner(&mut contract, Some(env::predecessor_account_id()));
 

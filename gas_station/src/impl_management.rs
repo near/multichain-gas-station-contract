@@ -16,7 +16,9 @@ use crate::{
     valid_transaction_request::ValidTransactionRequest,
     Contract, ContractExt, Flags, GetForeignChain, PendingTransactionSequence, StorageKey,
 };
-use lib::{asset::AssetId, foreign_address::ForeignAddress, oracle::PriceData, Rejectable};
+use lib::{
+    asset::AssetId, foreign_address::ForeignAddress, oracle::decode_pyth_price_id, Rejectable,
+};
 
 #[allow(clippy::needless_pass_by_value)]
 #[near_bindgen]
@@ -117,7 +119,7 @@ impl Contract {
             &chain_id.0,
             &ChainConfiguration {
                 next_paymaster: String::new(),
-                oracle_asset_id,
+                oracle_asset_id: decode_pyth_price_id(&oracle_asset_id),
                 transfer_gas: U256::from(transfer_gas.0).0,
                 fee_rate: (fee_rate.0.into(), fee_rate.1.into()),
                 paymasters: TreeMap::new(StorageKey::Paymasters(chain_id.0)),
@@ -129,7 +131,7 @@ impl Contract {
         self.assert_owner();
 
         self.with_mut_chain(chain_id.0, |config| {
-            config.oracle_asset_id = oracle_asset_id;
+            config.oracle_asset_id = decode_pyth_price_id(&oracle_asset_id);
         });
     }
 
@@ -153,7 +155,7 @@ impl Contract {
             .iter()
             .map(|(chain_id, config)| GetForeignChain {
                 chain_id: chain_id.into(),
-                oracle_asset_id: config.oracle_asset_id,
+                oracle_asset_id: near_sdk::bs58::encode(&config.oracle_asset_id).into_string(),
             })
             .collect()
     }
@@ -336,8 +338,8 @@ impl Contract {
     pub fn estimate_gas_cost(
         &self,
         transaction_rlp_hex: String,
-        price_data: PriceData,
-        deposit_asset_id: Option<AssetId>,
+        local_asset_price: pyth::state::Price,
+        foreign_asset_price: pyth::state::Price,
     ) -> U128 {
         let transaction =
             ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
@@ -349,14 +351,12 @@ impl Contract {
         let request_tokens_for_gas =
             (transaction.gas() + paymaster_transaction_gas) * transaction.max_fee_per_gas();
 
-        let deposit_asset_id = deposit_asset_id.unwrap_or(AssetId::Native);
-        let oracle_asset_id = self
-            .supported_assets_oracle_asset_ids
-            .get(&deposit_asset_id)
-            .expect_or_reject("Unsupported deposit asset");
-
         foreign_chain_configuration
-            .foreign_token_price(&oracle_asset_id, &price_data, request_tokens_for_gas)
+            .foreign_token_price(
+                &local_asset_price,
+                &foreign_asset_price,
+                request_tokens_for_gas,
+            )
             .into()
     }
 }

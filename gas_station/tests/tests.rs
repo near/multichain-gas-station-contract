@@ -9,7 +9,11 @@ use gas_station::{
     Nep141ReceiverCreateTransactionArgs, TransactionSequenceCreation,
 };
 use lib::{
-    asset::AssetId, foreign_address::ForeignAddress, kdf::get_mpc_address, signer::MpcSignature,
+    asset::AssetId,
+    foreign_address::ForeignAddress,
+    kdf::get_mpc_address,
+    oracle::{PYTH_PRICE_ID_ETH_USD, PYTH_PRICE_ID_NEAR_USD},
+    signer::MpcSignature,
 };
 use near_sdk::{serde::Deserialize, serde_json::json};
 use near_workspaces::{
@@ -88,13 +92,13 @@ async fn test_workflow_happy_path() {
             "signer_contract_id": nft_key.id(),
             "oracle_id": oracle.id(),
             "supported_assets_oracle_asset_ids": [
-                [AssetId::Native, "wrap.testnet"],
-                [AssetId::Nep141(local_ft.id().as_str().parse().unwrap()), "local_ft.testnet"],
+                [AssetId::Native, PYTH_PRICE_ID_NEAR_USD],
+                [AssetId::Nep141(local_ft.id().as_str().parse().unwrap()), PYTH_PRICE_ID_ETH_USD],
             ],
         })))
         .call(Function::new("add_foreign_chain").args_json(json!({
             "chain_id": "0",
-            "oracle_asset_id": "weth.fakes.testnet",
+            "oracle_asset_id": PYTH_PRICE_ID_ETH_USD,
             "transfer_gas": "21000",
             "fee_rate": ["120", "100"],
         })))
@@ -459,13 +463,13 @@ async fn test_nft_keys_approvals() {
             "signer_contract_id": nft_key.id(),
             "oracle_id": oracle.id(),
             "supported_assets_oracle_asset_ids": [
-                [AssetId::Native, "wrap.testnet"],
-                [AssetId::Nep141(local_ft.id().as_str().parse().unwrap()), "local_ft.testnet"],
+                [AssetId::Native, PYTH_PRICE_ID_NEAR_USD],
+                [AssetId::Nep141(local_ft.id().as_str().parse().unwrap()), PYTH_PRICE_ID_ETH_USD],
             ],
         })))
         .call(Function::new("add_foreign_chain").args_json(json!({
             "chain_id": "0",
-            "oracle_asset_id": "weth.fakes.testnet",
+            "oracle_asset_id": PYTH_PRICE_ID_ETH_USD,
             "transfer_gas": "21000",
             "fee_rate": ["120", "100"],
         })))
@@ -755,13 +759,13 @@ async fn test_nft_keys_approvals_revoked() {
             "signer_contract_id": nft_key.id(),
             "oracle_id": oracle.id(),
             "supported_assets_oracle_asset_ids": [
-                [AssetId::Native, "wrap.testnet"],
-                [AssetId::Nep141(local_ft.id().as_str().parse().unwrap()), "local_ft.testnet"],
+                [AssetId::Native, PYTH_PRICE_ID_NEAR_USD],
+                [AssetId::Nep141(local_ft.id().as_str().parse().unwrap()), PYTH_PRICE_ID_ETH_USD],
             ],
         })))
         .call(Function::new("add_foreign_chain").args_json(json!({
             "chain_id": "0",
-            "oracle_asset_id": "weth.fakes.testnet",
+            "oracle_asset_id": PYTH_PRICE_ID_ETH_USD,
             "transfer_gas": "21000",
             "fee_rate": ["120", "100"],
         })))
@@ -1013,3 +1017,5 @@ fn test_derive_new_mpc() {
         recovered_signed_transaction.from().unwrap()
     );
 }
+
+// TODO: Test security failsafes (pausability, spending cap, etc.)

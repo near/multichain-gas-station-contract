@@ -1,10 +1,15 @@
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
-    env, ext_contract,
+    bs58, ext_contract,
     json_types::{U128, U64},
     serde::{Deserialize, Serialize},
 };
 use schemars::JsonSchema;
+
+use crate::Rejectable;
+
+pub const PYTH_PRICE_ID_NEAR_USD: &str = "3gnSbT7bhoTdGkFVZc1dW1PvjreWzpUNUD5ppXwv1N59";
+pub const PYTH_PRICE_ID_ETH_USD: &str = "EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw";
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, JsonSchema, Clone, Copy)]
 #[serde(crate = "near_sdk::serde")]
@@ -34,27 +39,10 @@ pub trait OracleInterface {
     fn get_price_data(&self, asset_ids: Option<Vec<String>>) -> PriceData;
 }
 
-#[must_use]
-pub fn process_oracle_result(
-    local_asset_id: &str,
-    foreign_asset_id: &str,
-    price_data: &PriceData,
-) -> (u128, u128) {
-    let (local_price, foreign_price) = match &price_data.prices[..] {
-        [AssetOptionalPrice {
-            asset_id: first_asset_id,
-            price: Some(first_price),
-        }, AssetOptionalPrice {
-            asset_id: second_asset_id,
-            price: Some(second_price),
-        }] if first_asset_id == local_asset_id && second_asset_id == foreign_asset_id => {
-            (first_price, second_price)
-        }
-        _ => env::panic_str("Invalid price data"),
-    };
-
-    (
-        foreign_price.multiplier.0 * u128::from(local_price.decimals),
-        local_price.multiplier.0 * u128::from(foreign_price.decimals),
-    )
+pub fn decode_pyth_price_id(s: &str) -> [u8; 32] {
+    let mut b = [0u8; 32];
+    bs58::decode(s)
+        .into(&mut b)
+        .expect_or_reject("Failed to decode Pyth price identifier");
+    b
 }

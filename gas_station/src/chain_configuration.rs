@@ -1,9 +1,7 @@
+use std::cmp::Ordering;
+
 use ethers_core::types::U256;
-use lib::{
-    foreign_address::ForeignAddress,
-    oracle::{process_oracle_result, PriceData},
-    Rejectable,
-};
+use lib::{foreign_address::ForeignAddress, Rejectable};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     json_types::U128,
@@ -60,7 +58,7 @@ pub struct ChainConfiguration {
     pub next_paymaster: String,
     pub transfer_gas: [u64; 4],
     pub fee_rate: (u128, u128),
-    pub oracle_asset_id: String,
+    pub oracle_asset_id: [u8; 32],
 }
 
 #[derive(Debug, Error)]
@@ -87,12 +85,26 @@ impl ChainConfiguration {
 
     pub fn foreign_token_price(
         &self,
-        oracle_local_asset_id: &str,
-        price_data: &PriceData,
+        local_asset_price: &pyth::state::Price,
+        foreign_asset_price: &pyth::state::Price,
         foreign_tokens: U256,
     ) -> u128 {
-        let foreign_token_price =
-            process_oracle_result(oracle_local_asset_id, &self.oracle_asset_id, price_data);
+        let mut foreign_token_price = (
+            u128::try_from(local_asset_price.price.0).expect_or_reject("Negative price"),
+            u128::try_from(foreign_asset_price.price.0).expect_or_reject("Negative price"),
+        );
+
+        let exp = local_asset_price.expo - foreign_asset_price.expo;
+
+        match exp.cmp(&0) {
+            Ordering::Less => {
+                foreign_token_price.1 *= 10u128.pow(exp.unsigned_abs());
+            }
+            Ordering::Greater => {
+                foreign_token_price.0 *= 10u128.pow(exp as u32);
+            }
+            Ordering::Equal => {}
+        }
 
         // calculate fee based on currently known price, and include fee rate
         let a = foreign_tokens * U256::from(foreign_token_price.0) * U256::from(self.fee_rate.0);

@@ -9,7 +9,7 @@ use lib::{
     asset::{AssetBalance, AssetId},
     chain_key::ext_chain_key_token,
     foreign_address::ForeignAddress,
-    oracle::{ext_oracle, PriceData},
+    oracle::decode_pyth_price_id,
     Rejectable,
 };
 use near_sdk::{
@@ -24,6 +24,7 @@ use near_sdk::{
 #[allow(clippy::wildcard_imports)]
 use near_sdk_contract_tools::{owner::*, pause::*};
 use near_sdk_contract_tools::{standard::nep297::Event, Owner, Pause};
+use pyth::ext::ext_pyth;
 use schemars::JsonSchema;
 
 pub mod chain_configuration;
@@ -205,13 +206,14 @@ pub enum StorageKey {
 
 // TODO: Cooldown timer/lock on nft keys before they can be returned to the user or used again in the gas station contract to avoid race condition
 // TODO: Storage management
+// TODO: Pyth oracle support
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Owner, Pause)]
 #[near_bindgen]
 pub struct Contract {
     pub next_unique_id: u64,
     pub signer_contract_id: AccountId,
     pub oracle_id: AccountId,
-    pub supported_assets_oracle_asset_ids: UnorderedMap<AssetId, String>,
+    pub supported_assets_oracle_asset_ids: UnorderedMap<AssetId, [u8; 32]>,
     pub flags: Flags,
     pub expire_sequence_after_blocks: u64,
     pub foreign_chains: UnorderedMap<u64, ChainConfiguration>,
@@ -255,9 +257,11 @@ impl Contract {
             collected_fees: UnorderedMap::new(StorageKey::CollectedFees),
         };
 
-        contract
-            .supported_assets_oracle_asset_ids
-            .extend(supported_assets_oracle_asset_ids);
+        contract.supported_assets_oracle_asset_ids.extend(
+            supported_assets_oracle_asset_ids
+                .into_iter()
+                .map(|(a, s)| (a, decode_pyth_price_id(&s))),
+        );
 
         Owner::init(&mut contract, &env::predecessor_account_id());
 
@@ -322,17 +326,20 @@ impl Contract {
             let chain_id = transaction.chain_id();
             let foreign_chain_configuration = self.get_chain(chain_id.as_u64()).unwrap_or_reject();
 
-            ext_oracle::ext(self.oracle_id.clone())
-                .get_price_data(Some(vec![
-                    supported_asset_oracle_asset_id.clone(),
-                    foreign_chain_configuration.oracle_asset_id.clone(),
-                ]))
+            ext_pyth::ext(self.oracle_id.clone())
+                .get_price(pyth::state::PriceIdentifier(
+                    supported_asset_oracle_asset_id,
+                ))
+                .and(
+                    ext_pyth::ext(self.oracle_id.clone()).get_price(pyth::state::PriceIdentifier(
+                        foreign_chain_configuration.oracle_asset_id,
+                    )),
+                )
                 .then(
                     Self::ext(env::current_account_id()).create_transaction_callback(
                         account_id,
                         token_id,
                         deposit,
-                        supported_asset_oracle_asset_id.clone(),
                         transaction,
                     ),
                 )
@@ -371,9 +378,9 @@ impl Contract {
         #[serializer(borsh)] sender: AccountId,
         #[serializer(borsh)] token_id: String,
         #[serializer(borsh)] deposit: AssetBalance,
-        #[serializer(borsh)] oracle_asset_id: String,
         #[serializer(borsh)] transaction_request: ValidTransactionRequest,
-        #[callback_result] result: Result<PriceData, PromiseError>,
+        #[callback_result] result_local: Result<pyth::state::Price, PromiseError>,
+        #[callback_result] result_foreign: Result<pyth::state::Price, PromiseError>,
     ) -> TransactionSequenceCreation {
         // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
         let mut foreign_chain_configuration = self
@@ -383,15 +390,20 @@ impl Contract {
                 chain_id: transaction_request.chain_id,
             });
 
-        let price_data = result.ok().expect_or_reject("Failed to fetch price data");
+        let price_data_local = result_local
+            .ok()
+            .expect_or_reject("Failed to fetch local price data");
+        let price_data_foreign = result_foreign
+            .ok()
+            .expect_or_reject("Failed to fetch foreign price data");
 
         let paymaster_transaction_gas = foreign_chain_configuration.transfer_gas();
         let request_tokens_for_gas = (transaction_request.gas() + paymaster_transaction_gas)
             * transaction_request.max_fee_per_gas(); // Validation ensures gas is set.
 
         let fee = foreign_chain_configuration.foreign_token_price(
-            &oracle_asset_id,
-            &price_data,
+            &price_data_local,
+            &price_data_foreign,
             request_tokens_for_gas,
         );
         let deposit_amount = deposit.amount.0;
