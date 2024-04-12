@@ -83,32 +83,32 @@ impl ChainConfiguration {
         self.paymasters.get(&paymaster_key)
     }
 
-    pub fn foreign_token_price(
+    pub fn token_conversion_price(
         &self,
-        local_asset_price: &pyth::state::Price,
-        foreign_asset_price: &pyth::state::Price,
-        foreign_tokens: U256,
+        quantity_to_convert: U256,
+        from_asset_price: &pyth::state::Price,
+        into_asset_price: &pyth::state::Price,
     ) -> u128 {
-        let mut foreign_token_price = (
-            u128::try_from(local_asset_price.price.0).expect_or_reject("Negative price"),
-            u128::try_from(foreign_asset_price.price.0).expect_or_reject("Negative price"),
+        let mut conversion_rate = (
+            u128::try_from(into_asset_price.price.0).expect_or_reject("Negative price"),
+            u128::try_from(from_asset_price.price.0).expect_or_reject("Negative price"),
         );
 
-        let exp = local_asset_price.expo - foreign_asset_price.expo;
+        let exp = into_asset_price.expo - from_asset_price.expo;
 
         match exp.cmp(&0) {
             Ordering::Less => {
-                foreign_token_price.1 *= 10u128.pow(exp.unsigned_abs());
+                conversion_rate.1 *= 10u128.pow(exp.unsigned_abs());
             }
             Ordering::Greater => {
-                foreign_token_price.0 *= 10u128.pow(exp as u32);
+                conversion_rate.0 *= 10u128.pow(exp as u32);
             }
             Ordering::Equal => {}
         }
 
         // calculate fee based on currently known price, and include fee rate
-        let a = foreign_tokens * U256::from(foreign_token_price.0) * U256::from(self.fee_rate.0);
-        let (b, rem) = a.div_mod(U256::from(foreign_token_price.1) * U256::from(self.fee_rate.1));
+        let a = quantity_to_convert * U256::from(conversion_rate.0) * U256::from(self.fee_rate.0);
+        let (b, rem) = a.div_mod(U256::from(conversion_rate.1) * U256::from(self.fee_rate.1));
         // round up
         if rem.is_zero() { b } else { b + 1 }.as_u128()
     }

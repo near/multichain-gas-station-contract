@@ -206,7 +206,6 @@ pub enum StorageKey {
 
 // TODO: Cooldown timer/lock on nft keys before they can be returned to the user or used again in the gas station contract to avoid race condition
 // TODO: Storage management
-// TODO: Pyth oracle support
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Owner, Pause)]
 #[near_bindgen]
 pub struct Contract {
@@ -401,10 +400,10 @@ impl Contract {
         let request_tokens_for_gas = (transaction_request.gas() + paymaster_transaction_gas)
             * transaction_request.max_fee_per_gas(); // Validation ensures gas is set.
 
-        let fee = foreign_chain_configuration.foreign_token_price(
-            &price_data_local,
-            &price_data_foreign,
+        let fee = foreign_chain_configuration.token_conversion_price(
             request_tokens_for_gas,
+            &price_data_foreign,
+            &price_data_local,
         );
         let deposit_amount = deposit.amount.0;
 

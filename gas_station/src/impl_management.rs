@@ -352,10 +352,10 @@ impl Contract {
             (transaction.gas() + paymaster_transaction_gas) * transaction.max_fee_per_gas();
 
         foreign_chain_configuration
-            .foreign_token_price(
-                &local_asset_price,
-                &foreign_asset_price,
+            .token_conversion_price(
                 request_tokens_for_gas,
+                &foreign_asset_price,
+                &local_asset_price,
             )
             .into()
     }
