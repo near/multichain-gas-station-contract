@@ -90,8 +90,12 @@ impl ChainConfiguration {
         into_asset_price: &pyth::state::Price,
     ) -> u128 {
         let mut conversion_rate = (
-            u128::try_from(into_asset_price.price.0).expect_or_reject("Negative price"),
-            u128::try_from(from_asset_price.price.0).expect_or_reject("Negative price"),
+            u128::try_from(into_asset_price.price.0).expect_or_reject("Negative price")
+                // Pessimistic pricing for the asset we're converting into. (Assume it is more valuable.)
+                + u128::from(into_asset_price.conf.0),
+            u128::try_from(from_asset_price.price.0).expect_or_reject("Negative price")
+                // Pessimistic pricing for the asset we're converting from. (Assume it is less valuable.)
+                - u128::from(from_asset_price.conf.0),
         );
 
         let exp = into_asset_price.expo - from_asset_price.expo;
