@@ -1,5 +1,3 @@
-// NOTE: If tests fail due to a directory not existing error, create `target/near/{gas_station,oracle,signer}`
-
 use ethers_core::{
     types::transaction::eip2718::TypedTransaction,
     utils::{self, hex, rlp::Rlp},
@@ -17,42 +15,56 @@ use lib::{
 };
 use near_sdk::{serde::Deserialize, serde_json::json};
 use near_workspaces::{
+    network::Sandbox,
     operations::Function,
     types::{Gas, NearToken},
+    Account, Contract, Worker,
 };
 
-#[tokio::test]
-async fn test_workflow_happy_path() {
-    let w = near_workspaces::sandbox().await.unwrap();
+#[allow(dead_code)]
+struct Setup {
+    worker: Worker<Sandbox>,
+    gas_station: Contract,
+    oracle: Contract,
+    signer: Contract,
+    nft_key: Contract,
+    local_ft: Contract,
+    alice: Account,
+    alice_key: String,
+    paymaster_key: String,
+}
+
+async fn setup() -> Setup {
+    let worker = near_workspaces::sandbox().await.unwrap();
 
     let (gas_station, oracle, signer, nft_key, local_ft, alice) = tokio::join!(
         async {
             let wasm = near_workspaces::compile_project("./").await.unwrap();
-            w.dev_deploy(&wasm).await.unwrap()
+            worker.dev_deploy(&wasm).await.unwrap()
         },
         async {
             let wasm = near_workspaces::compile_project("../mock/oracle")
                 .await
                 .unwrap();
-            w.dev_deploy(&wasm).await.unwrap()
+            worker.dev_deploy(&wasm).await.unwrap()
         },
         async {
             let wasm = near_workspaces::compile_project("../mock/signer")
                 .await
                 .unwrap();
-            w.dev_deploy(&wasm).await.unwrap()
+            worker.dev_deploy(&wasm).await.unwrap()
         },
         async {
             let wasm = near_workspaces::compile_project("../nft_key")
                 .await
                 .unwrap();
-            w.dev_deploy(&wasm).await.unwrap()
+            worker.dev_deploy(&wasm).await.unwrap()
         },
         async {
             let wasm = near_workspaces::compile_project("../mock/local_ft")
                 .await
                 .unwrap();
-            let c = w.dev_deploy(&wasm).await.unwrap();
+            let c = worker.dev_deploy(&wasm).await.unwrap();
             c.call("new")
                 .args_json(json!({}))
                 .transact()
@@ -61,7 +73,7 @@ async fn test_workflow_happy_path() {
                 .unwrap();
             c
         },
-        async { w.dev_create_account().await.unwrap() },
+        async { worker.dev_create_account().await.unwrap() },
     );
 
     println!("{:<16} {}", "Gas Station:", gas_station.id());
@@ -146,17 +158,16 @@ async fn test_workflow_happy_path() {
 
     println!("Paymaster key: {paymaster_key}");
 
-    println!("Transferring paymaster NFT key to gas station...");
+    println!("Approving paymaster NFT key to gas station...");
     alice
-        .call(nft_key.id(), "nft_transfer_call")
+        .call(nft_key.id(), "ckt_approve")
         .args_json(json!({
-            "receiver_id": gas_station.id(),
+            "account_id": gas_station.id(),
             "token_id": paymaster_key,
             "msg": near_sdk::serde_json::to_string(&gas_station::ChainKeyReceiverMsg {
                 is_paymaster: true,
             }).unwrap(),
         }))
-        .deposit(NearToken::from_yoctonear(1))
         .max_gas()
         .transact()
         .await
@@ -190,15 +201,16 @@ async fn test_workflow_happy_path() {
 
     println!("Alice's NFT key: {alice_key}");
 
-    println!("Transferring Alice's NFT key to gas station...");
+    println!("Approving Alice's NFT key to be used by gas station...");
     alice
-        .call(nft_key.id(), "nft_transfer_call")
+        .call(nft_key.id(), "ckt_approve")
         .args_json(json!({
-            "receiver_id": gas_station.id(),
+            "account_id": gas_station.id(),
             "token_id": alice_key,
             "msg": "",
         }))
-        .deposit(NearToken::from_yoctonear(1))
+        // TODO: Should this function requrie a 1-yocto deposit?
+        // .deposit(NearToken::from_yoctonear(1))
         .max_gas()
         .transact()
         .await
@@ -206,6 +218,30 @@ async fn test_workflow_happy_path() {
         .unwrap();
 
     println!("Initialization complete.");
+
+    Setup {
+        worker,
+        gas_station,
+        oracle,
+        signer,
+        nft_key,
+        local_ft,
+        alice,
+        alice_key,
+        paymaster_key,
+    }
+}
+
+#[tokio::test]
+async fn test_workflow_happy_path() {
+    let Setup {
+        gas_station,
+        local_ft,
+        alice,
+        alice_key,
+        paymaster_key,
+        ..
+    } = setup().await;
 
     println!("Checking paymaster configuration...");
     let result = gas_station
@@ -393,485 +429,14 @@ async fn test_workflow_happy_path() {
 }
 
 #[tokio::test]
-async fn test_nft_keys_approvals() {
-    let w = near_workspaces::sandbox().await.unwrap();
-
-    let (gas_station, oracle, signer, nft_key, local_ft, alice) = tokio::join!(
-        async {
-            let wasm = near_workspaces::compile_project("./").await.unwrap();
-            w.dev_deploy(&wasm).await.unwrap()
-        },
-        async {
-            let wasm = near_workspaces::compile_project("../mock/oracle")
-                .await
-                .unwrap();
-            w.dev_deploy(&wasm).await.unwrap()
-        },
-        async {
-            let wasm = near_workspaces::compile_project("../mock/signer")
-                .await
-                .unwrap();
-            w.dev_deploy(&wasm).await.unwrap()
-        },
-        async {
-            let wasm = near_workspaces::compile_project("../nft_key")
-                .await
-                .unwrap();
-            w.dev_deploy(&wasm).await.unwrap()
-        },
-        async {
-            let wasm = near_workspaces::compile_project("../mock/local_ft")
-                .await
-                .unwrap();
-            let c = w.dev_deploy(&wasm).await.unwrap();
-            c.call("new")
-                .args_json(json!({}))
-                .transact()
-                .await
-                .unwrap()
-                .unwrap();
-            c
-        },
-        async { w.dev_create_account().await.unwrap() },
-    );
-
-    println!("{:<16} {}", "Gas Station:", gas_station.id());
-    println!("{:<16} {}", "Oracle:", oracle.id());
-    println!("{:<16} {}", "Signer:", signer.id());
-    println!("{:<16} {}", "NFT Key:", nft_key.id());
-    println!("{:<16} {}", "Local FT:", local_ft.id());
-    println!("{:<16} {}", "Alice:", alice.id());
-
-    println!("Initializing the contracts...");
-
-    println!("Initializing NFT key contract...");
-    nft_key
-        .call("new")
-        .args_json(json!({
-            "signer_contract_id": signer.id(),
-        }))
-        .max_gas()
-        .transact()
-        .await
-        .unwrap()
-        .unwrap();
-
-    println!("Initializing gas station contract with Alice as owner...");
-    alice
-        .batch(gas_station.id())
-        .call(Function::new("new").args_json(json!({
-            "signer_contract_id": nft_key.id(),
-            "oracle_id": oracle.id(),
-            "supported_assets_oracle_asset_ids": [
-                [AssetId::Native, PYTH_PRICE_ID_NEAR_USD],
-                [AssetId::Nep141(local_ft.id().as_str().parse().unwrap()), PYTH_PRICE_ID_ETH_USD],
-            ],
-        })))
-        .call(Function::new("add_foreign_chain").args_json(json!({
-            "chain_id": "0",
-            "oracle_asset_id": PYTH_PRICE_ID_ETH_USD,
-            "transfer_gas": "21000",
-            "fee_rate": ["120", "100"],
-        })))
-        .transact()
-        .await
-        .unwrap()
-        .unwrap();
-
-    println!("Performing storage deposits...");
-    tokio::join!(
-        async {
-            alice
-                .call(nft_key.id(), "storage_deposit")
-                .args_json(json!({}))
-                .deposit(NearToken::from_near(1))
-                .transact()
-                .await
-                .unwrap()
-                .unwrap();
-        },
-        async {
-            alice
-                .call(nft_key.id(), "storage_deposit")
-                .args_json(json!({
-                    "account_id": gas_station.id(),
-                }))
-                .deposit(NearToken::from_near(1))
-                .transact()
-                .await
-                .unwrap()
-                .unwrap();
-        }
-    );
-
-    println!("Generating paymaster NFT key...");
-    let paymaster_key = alice
-        .call(nft_key.id(), "mint")
-        .max_gas()
-        .transact()
-        .await
-        .unwrap()
-        .json::<u32>()
-        .unwrap()
-        .to_string();
-
-    println!("Paymaster key: {paymaster_key}");
-
-    println!("Transferring paymaster NFT key to gas station...");
-    alice
-        .call(nft_key.id(), "nft_transfer_call")
-        .args_json(json!({
-            "receiver_id": gas_station.id(),
-            "token_id": paymaster_key,
-            "msg": near_sdk::serde_json::to_string(&gas_station::ChainKeyReceiverMsg {
-                is_paymaster: true,
-            }).unwrap(),
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .max_gas()
-        .transact()
-        .await
-        .unwrap()
-        .unwrap();
-
-    println!("Adding paymaster...");
-    alice
-        .call(gas_station.id(), "add_paymaster")
-        .args_json(json!({
-            "chain_id": "0",
-            "balance": "100000000",
-            "nonce": 0,
-            "token_id": paymaster_key,
-        }))
-        .transact()
-        .await
-        .unwrap()
-        .unwrap();
-
-    println!("Generating Alice's NFT key...");
-    let alice_key = alice
-        .call(nft_key.id(), "mint")
-        .max_gas()
-        .transact()
-        .await
-        .unwrap()
-        .json::<u32>()
-        .unwrap()
-        .to_string();
-
-    println!("Alice's NFT key: {alice_key}");
-
-    println!("Approving Alice's NFT key to be used by gas station...");
-    alice
-        .call(nft_key.id(), "ckt_approve")
-        .args_json(json!({
-            "account_id": gas_station.id(),
-            "token_id": alice_key,
-            "msg": "",
-        }))
-        // TODO: Should this function requrie a 1-yocto deposit?
-        // .deposit(NearToken::from_yoctonear(1))
-        .max_gas()
-        .transact()
-        .await
-        .unwrap()
-        .unwrap();
-
-    println!("Initialization complete.");
-
-    let eth_transaction = ethers_core::types::transaction::eip1559::Eip1559TransactionRequest {
-        chain_id: Some(0.into()),
-        from: None,
-        to: Some(ForeignAddress([1; 20]).into()),
-        data: None,
-        gas: Some(21000.into()),
-        max_fee_per_gas: Some(100.into()),
-        max_priority_fee_per_gas: Some(100.into()),
-        access_list: vec![].into(),
-        value: Some(100.into()),
-        nonce: Some(0.into()),
-    };
-
-    println!("Creating transaction...");
-
-    let tx = alice
-        .call(gas_station.id(), "create_transaction")
-        .args_json(json!({
-            "token_id": alice_key,
-            "transaction_rlp_hex": hex::encode_prefixed(&eth_transaction.rlp()),
-            "use_paymaster": true,
-        }))
-        .deposit(NearToken::from_near(1))
-        .gas(Gas::from_tgas(50))
-        .transact()
-        .await
-        .unwrap()
-        .json::<TransactionSequenceCreation>()
-        .unwrap();
-
-    println!("Transaction created.");
-
-    println!("Transaction: {tx:?}");
-
-    assert_eq!(tx.pending_signature_count, 2, "Two signatures are pending");
-
-    println!("Dispatching first signature...");
-
-    let signed_tx_1 = alice
-        .call(gas_station.id(), "sign_next")
-        .args_json(json!({
-            "id": tx.id,
-        }))
-        .gas(Gas::from_tgas(50))
-        .transact()
-        .await
-        .unwrap()
-        .json::<String>()
-        .unwrap();
-
-    println!("First signed transaction: {signed_tx_1:?}");
-
-    println!("Dispatching second signature...");
-
-    let signed_tx_2 = alice
-        .call(gas_station.id(), "sign_next")
-        .args_json(json!({
-            "id": tx.id,
-        }))
-        .gas(Gas::from_tgas(50))
-        .transact()
-        .await
-        .unwrap()
-        .json::<String>()
-        .unwrap();
-
-    println!("Second signed transaction: {signed_tx_2:?}");
-
-    let _alice_foreign_address = gas_station
-        .view("get_foreign_address_for")
-        .args_json(json!({
-            "account_id": alice.id(),
-            "token_id": alice_key,
-        }))
-        .await
-        .unwrap()
-        .json::<ForeignAddress>()
-        .unwrap();
-
-    let signed_transaction_bytes = hex::decode(&signed_tx_2).unwrap();
-    let signed_transaction_rlp = Rlp::new(&signed_transaction_bytes);
-    let (_tx, _s) = TypedTransaction::decode_signed(&signed_transaction_rlp).unwrap();
-    // IGNORE: due to not having a real MPC to mock and not actually deriving keys
-    // assert_eq!(alice_foreign_address, tx.from().unwrap().into());
-
-    let signed_transaction_sequences = gas_station
-        .view("list_signed_transaction_sequences_after")
-        .args_json(json!({
-            "block_height": "0",
-        }))
-        .await
-        .unwrap()
-        .json::<Vec<TransactionSequenceSigned>>()
-        .unwrap();
-
-    assert_eq!(
-        signed_transaction_sequences,
-        vec![TransactionSequenceSigned {
-            id: tx.id,
-            foreign_chain_id: "0".to_string(),
-            created_by_account_id: alice.id().as_str().parse().unwrap(),
-            signed_transactions: vec![signed_tx_1, signed_tx_2],
-        }]
-    );
-
-    println!("List of signed transactions:");
-    println!("{:?}", signed_transaction_sequences);
-}
-
-#[tokio::test]
 async fn test_nft_keys_approvals_revoked() {
-    let w = near_workspaces::sandbox().await.unwrap();
-
-    let (gas_station, oracle, signer, nft_key, local_ft, alice) = tokio::join!(
-        async {
-            let wasm = near_workspaces::compile_project("./").await.unwrap();
-            w.dev_deploy(&wasm).await.unwrap()
-        },
-        async {
-            let wasm = near_workspaces::compile_project("../mock/oracle")
-                .await
-                .unwrap();
-            w.dev_deploy(&wasm).await.unwrap()
-        },
-        async {
-            let wasm = near_workspaces::compile_project("../mock/signer")
-                .await
-                .unwrap();
-            w.dev_deploy(&wasm).await.unwrap()
-        },
-        async {
-            let wasm = near_workspaces::compile_project("../nft_key")
-                .await
-                .unwrap();
-            w.dev_deploy(&wasm).await.unwrap()
-        },
-        async {
-            let wasm = near_workspaces::compile_project("../mock/local_ft")
-                .await
-                .unwrap();
-            let c = w.dev_deploy(&wasm).await.unwrap();
-            c.call("new")
-                .args_json(json!({}))
-                .transact()
-                .await
-                .unwrap()
-                .unwrap();
-            c
-        },
-        async { w.dev_create_account().await.unwrap() },
-    );
-
-    println!("{:<16} {}", "Gas Station:", gas_station.id());
-    println!("{:<16} {}", "Oracle:", oracle.id());
-    println!("{:<16} {}", "Signer:", signer.id());
-    println!("{:<16} {}", "NFT Key:", nft_key.id());
-    println!("{:<16} {}", "Local FT:", local_ft.id());
-    println!("{:<16} {}", "Alice:", alice.id());
-
-    println!("Initializing the contracts...");
-
-    println!("Initializing NFT key contract...");
-    nft_key
-        .call("new")
-        .args_json(json!({
-            "signer_contract_id": signer.id(),
-        }))
-        .max_gas()
-        .transact()
-        .await
-        .unwrap()
-        .unwrap();
-
-    println!("Initializing gas station contract with Alice as owner...");
-    alice
-        .batch(gas_station.id())
-        .call(Function::new("new").args_json(json!({
-            "signer_contract_id": nft_key.id(),
-            "oracle_id": oracle.id(),
-            "supported_assets_oracle_asset_ids": [
-                [AssetId::Native, PYTH_PRICE_ID_NEAR_USD],
-                [AssetId::Nep141(local_ft.id().as_str().parse().unwrap()), PYTH_PRICE_ID_ETH_USD],
-            ],
-        })))
-        .call(Function::new("add_foreign_chain").args_json(json!({
-            "chain_id": "0",
-            "oracle_asset_id": PYTH_PRICE_ID_ETH_USD,
-            "transfer_gas": "21000",
-            "fee_rate": ["120", "100"],
-        })))
-        .transact()
-        .await
-        .unwrap()
-        .unwrap();
-
-    println!("Performing storage deposits...");
-    tokio::join!(
-        async {
-            alice
-                .call(nft_key.id(), "storage_deposit")
-                .args_json(json!({}))
-                .deposit(NearToken::from_near(1))
-                .transact()
-                .await
-                .unwrap()
-                .unwrap();
-        },
-        async {
-            alice
-                .call(nft_key.id(), "storage_deposit")
-                .args_json(json!({
-                    "account_id": gas_station.id(),
-                }))
-                .deposit(NearToken::from_near(1))
-                .transact()
-                .await
-                .unwrap()
-                .unwrap();
-        }
-    );
-
-    println!("Generating paymaster NFT key...");
-    let paymaster_key = alice
-        .call(nft_key.id(), "mint")
-        .max_gas()
-        .transact()
-        .await
-        .unwrap()
-        .json::<u32>()
-        .unwrap()
-        .to_string();
-
-    println!("Paymaster key: {paymaster_key}");
-
-    println!("Transferring paymaster NFT key to gas station...");
-    alice
-        .call(nft_key.id(), "nft_transfer_call")
-        .args_json(json!({
-            "receiver_id": gas_station.id(),
-            "token_id": paymaster_key,
-            "msg": near_sdk::serde_json::to_string(&gas_station::ChainKeyReceiverMsg {
-                is_paymaster: true,
-            }).unwrap(),
-        }))
-        .deposit(NearToken::from_yoctonear(1))
-        .max_gas()
-        .transact()
-        .await
-        .unwrap()
-        .unwrap();
-
-    println!("Adding paymaster...");
-    alice
-        .call(gas_station.id(), "add_paymaster")
-        .args_json(json!({
-            "chain_id": "0",
-            "balance": "100000000",
-            "nonce": 0,
-            "token_id": paymaster_key,
-        }))
-        .transact()
-        .await
-        .unwrap()
-        .unwrap();
-
-    println!("Generating Alice's NFT key...");
-    let alice_key = alice
-        .call(nft_key.id(), "mint")
-        .max_gas()
-        .transact()
-        .await
-        .unwrap()
-        .json::<u32>()
-        .unwrap()
-        .to_string();
-
-    println!("Alice's NFT key: {alice_key}");
-
-    println!("Approving Alice's NFT key to be used by gas station...");
-    alice
-        .call(nft_key.id(), "ckt_approve")
-        .args_json(json!({
-            "account_id": gas_station.id(),
-            "token_id": alice_key,
-            "msg": "",
-        }))
-        // TODO: Should this function requrie a 1-yocto deposit?
-        // .deposit(NearToken::from_yoctonear(1))
-        .max_gas()
-        .transact()
-        .await
-        .unwrap()
-        .unwrap();
+    let Setup {
+        gas_station,
+        nft_key,
+        alice,
+        alice_key,
+        ..
+    } = setup().await;
 
     println!("Revoking Alice's NFT key from being used by gas station...");
     alice
@@ -888,8 +453,6 @@ async fn test_nft_keys_approvals_revoked() {
         .await
         .unwrap()
         .unwrap();
-
-    println!("Initialization complete.");
 
     let eth_transaction = ethers_core::types::transaction::eip1559::Eip1559TransactionRequest {
         chain_id: Some(0.into()),
