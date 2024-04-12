@@ -378,8 +378,8 @@ impl Contract {
         #[serializer(borsh)] token_id: String,
         #[serializer(borsh)] deposit: AssetBalance,
         #[serializer(borsh)] transaction_request: ValidTransactionRequest,
-        #[callback_result] result_local: Result<pyth::state::Price, PromiseError>,
-        #[callback_result] result_foreign: Result<pyth::state::Price, PromiseError>,
+        #[callback_result] price_data_local_result: Result<pyth::state::Price, PromiseError>,
+        #[callback_result] price_data_foreign_result: Result<pyth::state::Price, PromiseError>,
     ) -> TransactionSequenceCreation {
         // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
         let mut foreign_chain_configuration = self
@@ -389,10 +389,10 @@ impl Contract {
                 chain_id: transaction_request.chain_id,
             });
 
-        let price_data_local = result_local
+        let price_data_local = price_data_local_result
             .ok()
             .expect_or_reject("Failed to fetch local price data");
-        let price_data_foreign = result_foreign
+        let price_data_foreign = price_data_foreign_result
             .ok()
             .expect_or_reject("Failed to fetch foreign price data");
 
@@ -478,7 +478,10 @@ impl Contract {
             signature_requests,
             created_by_account_id: sender,
             created_at_block_height: env::block_height().into(),
-            escrow: Some(AssetBalance::native(fee)),
+            escrow: Some(AssetBalance {
+                amount: fee.into(),
+                asset_id: deposit.asset_id,
+            }),
         };
 
         let creation = self.insert_transaction_sequence(pending_transaction_sequence.clone());
