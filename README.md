@@ -71,9 +71,8 @@ cargo make build-debug
 ### Setup and Administration
 
 1. Initialize the contract with a call to `new`. [The owner](https://github.com/near/near-sdk-contract-tools/blob/develop/src/owner.rs) is initialized as the predecessor of this transaction. All of the following transactions must be called by the owner.
-2. Refresh the MPC contract public key by calling `refresh_signer_public_key`.
-3. Set up foreign chain configurations with `add_foreign_chain`.
-4. Add paymasters to each foreign chain with `add_paymaster`.
+2. Set up foreign chain configurations with `add_foreign_chain`.
+3. Add paymasters to each foreign chain by transferring NFT keys and then calling `add_paymaster`.
 
 ### Usage
 

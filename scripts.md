@@ -5,26 +5,26 @@
 1. Deploy
 
    ```sh
-   near contract deploy canhazgas.testnet use-file ./target/wasm32-unknown-unknown/release/gas_station.wasm with-init-call new_debug json-args '{"oracle_id":"priceoracle.testnet","signer_contract_id":"multichain-testnet-2.testnet","supported_assets_oracle_asset_ids":[["Native","wrap.testnet"]]}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
+   near contract deploy canhazgas.testnet use-file ./target/wasm32-unknown-unknown/release/gas_station.wasm with-init-call new_debug json-args '{"oracle_id":"pyth-oracle.testnet","signer_contract_id":"multichain-testnet-2.testnet","supported_assets_oracle_asset_ids":[["Native","3gnSbT7bhoTdGkFVZc1dW1PvjreWzpUNUD5ppXwv1N59"]]}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
    ```
 
-2. Refresh signer key
+2. Add foreign chain
 
    ```sh
-   near contract call-function as-transaction canhazgas.testnet refresh_signer_public_key json-args {} prepaid-gas '50.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
+   near contract call-function as-transaction canhazgas.testnet add_foreign_chain json-args '{"chain_id":"97","oracle_asset_id":"GwzBgrXb4PG59zjce24SF2b9JXbLEjJJTBkmytuEZj1b","transfer_gas":"21000","fee_rate":["120","100"]}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
    ```
 
-3. Add foreign chain
-
-   ```sh
-   near contract call-function as-transaction canhazgas.testnet add_foreign_chain json-args '{"chain_id":"97","oracle_asset_id":"weth.fakes.testnet","transfer_gas":"21000","fee_rate":["120","100"]}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
-   ```
-
-4. Add paymaster
+3. Add paymaster
 
    ```sh
    near contract call-function as-transaction canhazgas.testnet add_paymaster json-args '{"chain_id":"97","balance":"100000000000000000000","nonce":0,"key_path":"$0"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
    ```
+
+Selected [Pyth price identifiers](https://pyth.network/price-feeds?cluster=pythtest-crosschain):
+
+- NEAR/USD: `3gnSbT7bhoTdGkFVZc1dW1PvjreWzpUNUD5ppXwv1N59`
+- ETH/USD: `EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw`
+- BNB/USD: `GwzBgrXb4PG59zjce24SF2b9JXbLEjJJTBkmytuEZj1b`
 
 ## Signing sequence
 
