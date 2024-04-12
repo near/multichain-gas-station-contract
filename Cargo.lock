@@ -3294,7 +3294,7 @@ dependencies = [
 [[package]]
 name = "parity-secp256k1"
 version = "0.7.0"
-source = "git+https://github.com/paritytech/rust-secp256k1#d05fd8e152f8d110b587906e3d854196b086e42a"
+source = "git+https://github.com/paritytech/rust-secp256k1?rev=d05fd8e152f8d110b587906e3d854196b086e42a#d05fd8e152f8d110b587906e3d854196b086e42a"
 dependencies = [
  "arrayvec 0.5.2",
  "cc",
@@ -3656,7 +3656,7 @@ checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 [[package]]
 name = "pyth-near"
 version = "0.1.0"
-source = "git+https://github.com/pyth-network/pyth-crosschain.git#d1c5d93c8e48a3b5c4df184b0573d2d712790854"
+source = "git+https://github.com/pyth-network/pyth-crosschain.git?rev=d1c5d93c8e48a3b5c4df184b0573d2d712790854#d1c5d93c8e48a3b5c4df184b0573d2d712790854"
 dependencies = [
  "byteorder",
  "hex",
@@ -3702,7 +3702,7 @@ dependencies = [
 [[package]]
 name = "pyth-wormhole-attester-sdk"
 version = "0.1.2"
-source = "git+https://github.com/pyth-network/pyth-crosschain.git#d1c5d93c8e48a3b5c4df184b0573d2d712790854"
+source = "git+https://github.com/pyth-network/pyth-crosschain.git?rev=d1c5d93c8e48a3b5c4df184b0573d2d712790854#d1c5d93c8e48a3b5c4df184b0573d2d712790854"
 dependencies = [
  "hex",
  "pyth-sdk 0.5.0",
@@ -3712,7 +3712,7 @@ dependencies = [
 [[package]]
 name = "pythnet-sdk"
 version = "2.0.0"
-source = "git+https://github.com/pyth-network/pyth-crosschain.git#d1c5d93c8e48a3b5c4df184b0573d2d712790854"
+source = "git+https://github.com/pyth-network/pyth-crosschain.git?rev=d1c5d93c8e48a3b5c4df184b0573d2d712790854#d1c5d93c8e48a3b5c4df184b0573d2d712790854"
 dependencies = [
  "bincode",
  "borsh 0.10.3",

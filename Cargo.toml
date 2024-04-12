@@ -10,7 +10,7 @@ near-sdk = { version = "4.1.1", default-features = false, features = [
     "abi",
 ] }
 near-sdk-contract-tools = "2.1"
-pyth-near = { git = "https://github.com/pyth-network/pyth-crosschain.git" }
+pyth-near = { git = "https://github.com/pyth-network/pyth-crosschain.git", rev = "d1c5d93c8e48a3b5c4df184b0573d2d712790854" }
 schemars = "0.8.16"
 thiserror = "1"
 
@@ -24,4 +24,4 @@ panic = "abort"
 strip = true
 
 [patch.crates-io]
-parity-secp256k1 = { git = "https://github.com/paritytech/rust-secp256k1" }
+parity-secp256k1 = { git = "https://github.com/paritytech/rust-secp256k1", rev = "d05fd8e152f8d110b587906e3d854196b086e42a" }
