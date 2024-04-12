@@ -83,19 +83,30 @@ impl ChainConfiguration {
         self.paymasters.get(&paymaster_key)
     }
 
+    /// Calculate the price that this chain configuration charges to convert
+    /// assets. Applies a fee on top of the provided market rates.
     pub fn token_conversion_price(
         &self,
         quantity_to_convert: U256,
         from_asset_price: &pyth::state::Price,
         into_asset_price: &pyth::state::Price,
     ) -> u128 {
+        // Construct conversion rate
         let mut conversion_rate = (
-            u128::try_from(into_asset_price.price.0).expect_or_reject("Negative price")
-                // Pessimistic pricing for the asset we're converting into. (Assume it is more valuable.)
-                + u128::from(into_asset_price.conf.0),
-            u128::try_from(from_asset_price.price.0).expect_or_reject("Negative price")
-                // Pessimistic pricing for the asset we're converting from. (Assume it is less valuable.)
-                - u128::from(from_asset_price.conf.0),
+            u128::try_from(into_asset_price.price.0)
+                .expect_or_reject("Negative price")
+                .checked_add(
+                    // Pessimistic pricing for the asset we're converting into. (Assume it is more valuable.)
+                    u128::from(into_asset_price.conf.0),
+                )
+                .expect_or_reject("Confidence interval too large"),
+            u128::try_from(from_asset_price.price.0)
+                .expect_or_reject("Negative price")
+                .checked_sub(
+                    // Pessimistic pricing for the asset we're converting from. (Assume it is less valuable.)
+                    u128::from(from_asset_price.conf.0),
+                )
+                .expect_or_reject("Confidence interval too large"),
         );
 
         let exp = into_asset_price.expo - from_asset_price.expo;
@@ -110,10 +121,11 @@ impl ChainConfiguration {
             Ordering::Equal => {}
         }
 
-        // calculate fee based on currently known price, and include fee rate
+        // Apply conversion rate to quantity in two steps: multiply, then divide.
         let a = quantity_to_convert * U256::from(conversion_rate.0) * U256::from(self.fee_rate.0);
         let (b, rem) = a.div_mod(U256::from(conversion_rate.1) * U256::from(self.fee_rate.1));
-        // round up
+
+        // Round up. Again, pessimistic pricing.
         if rem.is_zero() { b } else { b + 1 }.as_u128()
     }
 }
