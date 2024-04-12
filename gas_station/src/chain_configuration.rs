@@ -1,9 +1,7 @@
+use std::cmp::Ordering;
+
 use ethers_core::types::U256;
-use lib::{
-    foreign_address::ForeignAddress,
-    oracle::{process_oracle_result, PriceData},
-    Rejectable,
-};
+use lib::{foreign_address::ForeignAddress, Rejectable};
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     json_types::U128,
@@ -60,7 +58,7 @@ pub struct ChainConfiguration {
     pub next_paymaster: String,
     pub transfer_gas: [u64; 4],
     pub fee_rate: (u128, u128),
-    pub oracle_asset_id: String,
+    pub oracle_asset_id: [u8; 32],
 }
 
 #[derive(Debug, Error)]
@@ -85,19 +83,49 @@ impl ChainConfiguration {
         self.paymasters.get(&paymaster_key)
     }
 
-    pub fn foreign_token_price(
+    /// Calculate the price that this chain configuration charges to convert
+    /// assets. Applies a fee on top of the provided market rates.
+    pub fn token_conversion_price(
         &self,
-        oracle_local_asset_id: &str,
-        price_data: &PriceData,
-        foreign_tokens: U256,
+        quantity_to_convert: U256,
+        from_asset_price: &pyth::state::Price,
+        into_asset_price: &pyth::state::Price,
     ) -> u128 {
-        let foreign_token_price =
-            process_oracle_result(oracle_local_asset_id, &self.oracle_asset_id, price_data);
+        // Construct conversion rate
+        let mut conversion_rate = (
+            u128::try_from(into_asset_price.price.0)
+                .expect_or_reject("Negative price")
+                .checked_add(
+                    // Pessimistic pricing for the asset we're converting into. (Assume it is more valuable.)
+                    u128::from(into_asset_price.conf.0),
+                )
+                .expect_or_reject("Confidence interval too large"),
+            u128::try_from(from_asset_price.price.0)
+                .expect_or_reject("Negative price")
+                .checked_sub(
+                    // Pessimistic pricing for the asset we're converting from. (Assume it is less valuable.)
+                    u128::from(from_asset_price.conf.0),
+                )
+                .expect_or_reject("Confidence interval too large"),
+        );
 
-        // calculate fee based on currently known price, and include fee rate
-        let a = foreign_tokens * U256::from(foreign_token_price.0) * U256::from(self.fee_rate.0);
-        let (b, rem) = a.div_mod(U256::from(foreign_token_price.1) * U256::from(self.fee_rate.1));
-        // round up
+        let exp = into_asset_price.expo - from_asset_price.expo;
+
+        match exp.cmp(&0) {
+            Ordering::Less => {
+                conversion_rate.1 *= 10u128.pow(exp.unsigned_abs());
+            }
+            Ordering::Greater => {
+                conversion_rate.0 *= 10u128.pow(exp as u32);
+            }
+            Ordering::Equal => {}
+        }
+
+        // Apply conversion rate to quantity in two steps: multiply, then divide.
+        let a = quantity_to_convert * U256::from(conversion_rate.0) * U256::from(self.fee_rate.0);
+        let (b, rem) = a.div_mod(U256::from(conversion_rate.1) * U256::from(self.fee_rate.1));
+
+        // Round up. Again, pessimistic pricing.
         if rem.is_zero() { b } else { b + 1 }.as_u128()
     }
 }

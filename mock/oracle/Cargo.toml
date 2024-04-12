@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 near-sdk.workspace = true
 lib = { path = "../../lib" }
+pyth-near = { workspace = true, features = ["library"] }
 
 [lib]
 crate-type = ["cdylib"]

@@ -9,6 +9,7 @@ ethers-core.workspace = true
 lib = { path = "../lib" }
 near-sdk.workspace = true
 near-sdk-contract-tools.workspace = true
+pyth-near = { workspace = true, features = ["library"] }
 schemars.workspace = true
 thiserror.workspace = true
 

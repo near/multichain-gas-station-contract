@@ -4,6 +4,11 @@
 
 This smart contract accepts payments in NEAR tokens in exchange for gas funding on non-NEAR foreign chains. Part of the NEAR Multichain effort, it works in conjunction with the [MPC recovery service](https://github.com/near/mpc-recovery) to generate on-chain signatures.
 
+| Contract      | Testnet ID          | Mainnet ID |
+| ------------- | ------------------- | ---------- |
+| NFT Chain Key | `nft.kagi.testnet`  | &mdash;    |
+| Gas Station   | `canhazgas.testnet` | &mdash;    |
+
 ## What is it?
 
 This smart contract is a piece of the NEAR Multichain project, which makes NEAR Protocol an effortlessly cross-chain network. This contract accepts EVM transaction request payloads and facilitates the signing, gas funding, and relaying of the signed transactions to their destination chains. It works in conjunction with a few different services, including:
@@ -71,9 +76,8 @@ cargo make build-debug
 ### Setup and Administration
 
 1. Initialize the contract with a call to `new`. [The owner](https://github.com/near/near-sdk-contract-tools/blob/develop/src/owner.rs) is initialized as the predecessor of this transaction. All of the following transactions must be called by the owner.
-2. Refresh the MPC contract public key by calling `refresh_signer_public_key`.
-3. Set up foreign chain configurations with `add_foreign_chain`.
-4. Add paymasters to each foreign chain with `add_paymaster`.
+2. Set up foreign chain configurations with `add_foreign_chain`.
+3. Add paymasters to each foreign chain by transferring NFT keys and then calling `add_paymaster`.
 
 ### Usage
 

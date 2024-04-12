@@ -1,33 +1,47 @@
 use ethers_core::types::U256;
 use near_sdk::{
     collections::TreeMap,
+    env,
     json_types::{U128, U64},
     near_bindgen, require, AccountId, Promise,
 };
-use near_sdk_contract_tools::{
-    owner::{Owner, OwnerExternal},
-    pause::Pause,
-};
+use near_sdk_contract_tools::{pause::Pause, rbac::Rbac};
 
 use crate::{
     chain_configuration::{ChainConfiguration, PaymasterConfiguration, ViewPaymasterConfiguration},
     contract_event::TransactionSequenceSigned,
     decode_transaction_request,
     valid_transaction_request::ValidTransactionRequest,
-    Contract, ContractExt, Flags, GetForeignChain, PendingTransactionSequence, StorageKey,
+    Contract, ContractExt, Flags, GetForeignChain, PendingTransactionSequence, Role, StorageKey,
 };
-use lib::{asset::AssetId, foreign_address::ForeignAddress, oracle::PriceData, Rejectable};
+use lib::{
+    asset::AssetId, foreign_address::ForeignAddress, oracle::decode_pyth_price_id, Rejectable,
+};
 
 #[allow(clippy::needless_pass_by_value)]
 #[near_bindgen]
 impl Contract {
+    pub fn add_administrator(&mut self, account_id: AccountId) {
+        <Self as Rbac>::require_role(&Role::Administrator);
+        self.add_role(account_id, &Role::Administrator);
+    }
+
+    pub fn remove_administrator(&mut self, account_id: AccountId) {
+        <Self as Rbac>::require_role(&Role::Administrator);
+        self.remove_role(&account_id, &Role::Administrator);
+    }
+
+    pub fn get_administrators(&self) -> Vec<AccountId> {
+        <Self as Rbac>::iter_members_of(&Role::Administrator).collect()
+    }
+
     pub fn pause(&mut self) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         <Self as Pause>::pause(self);
     }
 
     pub fn unpause(&mut self) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         <Self as Pause>::unpause(self);
     }
 
@@ -36,7 +50,7 @@ impl Contract {
     }
 
     pub fn set_expire_sequence_after_blocks(&mut self, expire_sequence_after_blocks: U64) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         self.expire_sequence_after_blocks = expire_sequence_after_blocks.into();
     }
 
@@ -45,7 +59,7 @@ impl Contract {
     }
 
     pub fn set_signer_contract_id(&mut self, account_id: AccountId) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         self.signer_contract_id = account_id;
     }
 
@@ -54,7 +68,7 @@ impl Contract {
     }
 
     pub fn set_flags(&mut self, flags: Flags) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         self.flags = flags;
     }
 
@@ -63,21 +77,21 @@ impl Contract {
     }
 
     pub fn add_to_receiver_whitelist(&mut self, addresses: Vec<ForeignAddress>) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         for address in addresses {
             self.receiver_whitelist.insert(&address);
         }
     }
 
     pub fn remove_from_receiver_whitelist(&mut self, addresses: Vec<ForeignAddress>) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         for address in addresses {
             self.receiver_whitelist.remove(&address);
         }
     }
 
     pub fn clear_receiver_whitelist(&mut self) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         self.receiver_whitelist.clear();
     }
 
@@ -86,21 +100,21 @@ impl Contract {
     }
 
     pub fn add_to_sender_whitelist(&mut self, addresses: Vec<AccountId>) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         for address in addresses {
             self.sender_whitelist.insert(&address);
         }
     }
 
     pub fn remove_from_sender_whitelist(&mut self, addresses: Vec<AccountId>) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         for address in addresses {
             self.sender_whitelist.remove(&address);
         }
     }
 
     pub fn clear_sender_whitelist(&mut self) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         self.sender_whitelist.clear();
     }
 
@@ -111,13 +125,13 @@ impl Contract {
         transfer_gas: U128,
         fee_rate: (U128, U128),
     ) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
 
         self.foreign_chains.insert(
             &chain_id.0,
             &ChainConfiguration {
                 next_paymaster: String::new(),
-                oracle_asset_id,
+                oracle_asset_id: decode_pyth_price_id(&oracle_asset_id),
                 transfer_gas: U256::from(transfer_gas.0).0,
                 fee_rate: (fee_rate.0.into(), fee_rate.1.into()),
                 paymasters: TreeMap::new(StorageKey::Paymasters(chain_id.0)),
@@ -126,15 +140,15 @@ impl Contract {
     }
 
     pub fn set_foreign_chain_oracle_asset_id(&mut self, chain_id: U64, oracle_asset_id: String) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
 
         self.with_mut_chain(chain_id.0, |config| {
-            config.oracle_asset_id = oracle_asset_id;
+            config.oracle_asset_id = decode_pyth_price_id(&oracle_asset_id);
         });
     }
 
     pub fn set_foreign_chain_transfer_gas(&mut self, chain_id: U64, transfer_gas: U128) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
 
         self.with_mut_chain(chain_id.0, |config| {
             config.transfer_gas = U256::from(transfer_gas.0).0;
@@ -142,7 +156,7 @@ impl Contract {
     }
 
     pub fn remove_foreign_chain(&mut self, chain_id: U64) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         if let Some(mut config) = self.foreign_chains.remove(&chain_id.0) {
             config.paymasters.clear();
         }
@@ -153,7 +167,7 @@ impl Contract {
             .iter()
             .map(|(chain_id, config)| GetForeignChain {
                 chain_id: chain_id.into(),
-                oracle_asset_id: config.oracle_asset_id,
+                oracle_asset_id: near_sdk::bs58::encode(&config.oracle_asset_id).into_string(),
             })
             .collect()
     }
@@ -165,7 +179,7 @@ impl Contract {
         token_id: String,
         balance: Option<near_sdk::json_types::U128>,
     ) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
 
         require!(
             self.paymaster_keys.get(&token_id).is_some(),
@@ -186,7 +200,7 @@ impl Contract {
 
     pub fn set_paymaster_balance(&mut self, chain_id: U64, token_id: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
@@ -197,7 +211,7 @@ impl Contract {
 
     pub fn increase_paymaster_balance(&mut self, chain_id: U64, token_id: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
@@ -209,7 +223,7 @@ impl Contract {
 
     pub fn set_paymaster_nonce(&mut self, chain_id: U64, token_id: String, nonce: u32) {
         #[cfg(not(feature = "debug"))]
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
@@ -222,7 +236,7 @@ impl Contract {
     /// the paymaster getting removed, this method will not prevent those
     /// payloads from getting signed.
     pub fn remove_paymaster(&mut self, chain_id: U64, token_id: String) {
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             chain_config.paymasters.remove(&token_id).unwrap_or_reject();
@@ -238,7 +252,10 @@ impl Contract {
                 nonce: p.nonce,
                 token_id: p.token_id.clone(),
                 foreign_address: ForeignAddress::from_raw_public_key(
-                    self.paymaster_keys.get(&p.token_id).unwrap_or_reject(),
+                    self.paymaster_keys
+                        .get(&p.token_id)
+                        .unwrap_or_reject()
+                        .public_key_bytes,
                 ),
                 minimum_available_balance: U256(p.minimum_available_balance).as_u128().into(),
             })
@@ -293,7 +310,7 @@ impl Contract {
         receiver_id: Option<AccountId>, // TODO: Pull method instead of push (danger of typos/locked accounts)
     ) -> Promise {
         near_sdk::assert_one_yocto();
-        self.assert_owner();
+        <Self as Rbac>::require_role(&Role::Administrator);
         let mut fees = self
             .collected_fees
             .get(&asset_id)
@@ -309,7 +326,7 @@ impl Contract {
         self.collected_fees.insert(&asset_id, &fees);
 
         asset_id.transfer(
-            receiver_id.unwrap_or_else(|| self.own_get_owner().unwrap()),
+            receiver_id.unwrap_or_else(env::predecessor_account_id),
             amount,
         )
     }
@@ -336,8 +353,8 @@ impl Contract {
     pub fn estimate_gas_cost(
         &self,
         transaction_rlp_hex: String,
-        price_data: PriceData,
-        deposit_asset_id: Option<AssetId>,
+        local_asset_price: pyth::state::Price,
+        foreign_asset_price: pyth::state::Price,
     ) -> U128 {
         let transaction =
             ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
@@ -349,14 +366,12 @@ impl Contract {
         let request_tokens_for_gas =
             (transaction.gas() + paymaster_transaction_gas) * transaction.max_fee_per_gas();
 
-        let deposit_asset_id = deposit_asset_id.unwrap_or(AssetId::Native);
-        let oracle_asset_id = self
-            .supported_assets_oracle_asset_ids
-            .get(&deposit_asset_id)
-            .expect_or_reject("Unsupported deposit asset");
-
         foreign_chain_configuration
-            .foreign_token_price(&oracle_asset_id, &price_data, request_tokens_for_gas)
+            .token_conversion_price(
+                request_tokens_for_gas,
+                &foreign_asset_price,
+                &local_asset_price,
+            )
             .into()
     }
 }
