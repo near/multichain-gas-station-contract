@@ -152,7 +152,7 @@ async fn test_workflow_happy_path() {
         .args_json(json!({
             "receiver_id": gas_station.id(),
             "token_id": paymaster_key,
-            "msg": near_sdk::serde_json::to_string(&gas_station::Nep171ReceiverMsg {
+            "msg": near_sdk::serde_json::to_string(&gas_station::ChainKeyReceiverMsg {
                 is_paymaster: true,
             }).unwrap(),
         }))
@@ -523,7 +523,7 @@ async fn test_nft_keys_approvals() {
         .args_json(json!({
             "receiver_id": gas_station.id(),
             "token_id": paymaster_key,
-            "msg": near_sdk::serde_json::to_string(&gas_station::Nep171ReceiverMsg {
+            "msg": near_sdk::serde_json::to_string(&gas_station::ChainKeyReceiverMsg {
                 is_paymaster: true,
             }).unwrap(),
         }))
@@ -819,7 +819,7 @@ async fn test_nft_keys_approvals_revoked() {
         .args_json(json!({
             "receiver_id": gas_station.id(),
             "token_id": paymaster_key,
-            "msg": near_sdk::serde_json::to_string(&gas_station::Nep171ReceiverMsg {
+            "msg": near_sdk::serde_json::to_string(&gas_station::ChainKeyReceiverMsg {
                 is_paymaster: true,
             }).unwrap(),
         }))
@@ -935,7 +935,7 @@ fn generate_eth_rlp_hex() {
         max_fee_per_gas: Some(1234.into()),
         max_priority_fee_per_gas: Some(1234.into()),
         value: Some(1234.into()),
-        nonce: Some(8891.into()),
+        nonce: Some(8802.into()),
     };
 
     println!("RLP: {}", hex::encode_prefixed(eth_transaction.rlp()));
@@ -1017,5 +1017,3 @@ fn test_derive_new_mpc() {
         recovered_signed_transaction.from().unwrap()
     );
 }
-
-// TODO: Test security failsafes (pausability, spending cap, etc.)

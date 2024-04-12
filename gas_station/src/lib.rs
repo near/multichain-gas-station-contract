@@ -34,7 +34,7 @@ pub mod contract_event;
 use contract_event::{ContractEvent, TransactionSequenceCreated, TransactionSequenceSigned};
 
 mod impl_chain_key_nft;
-pub use impl_chain_key_nft::Nep171ReceiverMsg;
+pub use impl_chain_key_nft::ChainKeyReceiverMsg;
 #[cfg(feature = "debug")]
 mod impl_debug;
 mod impl_management;
@@ -469,10 +469,16 @@ impl Contract {
         self.foreign_chains
             .insert(&transaction_request.chain_id, &foreign_chain_configuration);
 
+        let paymaster_authorization = self
+            .paymaster_keys
+            .get(&paymaster.token_id)
+            .unwrap_or_reject()
+            .authorization;
+
         let signature_requests = vec![
             SignatureRequest::new(
                 &paymaster.token_id,
-                ChainKeyAuthorization::Owned,
+                paymaster_authorization,
                 paymaster_transaction,
                 true,
             ),

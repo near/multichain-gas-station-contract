@@ -18,7 +18,7 @@ use crate::{ChainKeyAuthorization, ChainKeyData, Contract, Role, StorageKey};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
-pub struct Nep171ReceiverMsg {
+pub struct ChainKeyReceiverMsg {
     pub is_paymaster: bool,
 }
 
@@ -82,7 +82,7 @@ impl Contract {
             <Self as Rbac>::has_role(&account_id, &Role::Administrator);
 
         let marked_as_paymaster_key = || {
-            near_sdk::serde_json::from_str::<Nep171ReceiverMsg>(&msg)
+            near_sdk::serde_json::from_str::<ChainKeyReceiverMsg>(&msg)
                 .map_or(false, |m| m.is_paymaster)
         };
 
