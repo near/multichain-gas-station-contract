@@ -10,11 +10,11 @@ use near_sdk::{
     serde::{Deserialize, Serialize},
     AccountId, Promise, PromiseError, PromiseOrValue,
 };
-use near_sdk_contract_tools::{nft::*, owner::OwnerExternal};
+use near_sdk_contract_tools::{nft::*, rbac::Rbac};
 
 #[allow(unused_imports)]
 use crate::ContractExt;
-use crate::{ChainKeyAuthorization, Contract, StorageKey, UserChainKey};
+use crate::{ChainKeyAuthorization, ChainKeyData, Contract, Role, StorageKey};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
@@ -31,72 +31,81 @@ impl Nep171Receiver for Contract {
         token_id: TokenId,
         msg: String,
     ) -> PromiseOrValue<bool> {
-        let predecessor = env::predecessor_account_id();
+        #[cfg(feature = "debug")]
+        {
+            let _ = (sender_id, previous_owner_id, token_id, msg);
+            env::panic_str("This contract is in debug mode. Use chain key approvals only to prevent loss of NFTs.");
+        }
 
-        require!(
-            predecessor == self.signer_contract_id,
-            "Unknown chain key NFT contract",
-        );
+        #[cfg(not(feature = "debug"))]
+        {
+            let _ = sender_id;
 
-        PromiseOrValue::Promise(
-            ext_chain_key_token::ext(env::predecessor_account_id())
-                .ckt_public_key_for(token_id.clone(), None)
-                .then(
-                    Self::ext(env::current_account_id()).nft_on_transfer_callback(
-                        sender_id,
-                        previous_owner_id,
-                        token_id,
-                        msg,
+            let predecessor = env::predecessor_account_id();
+
+            require!(
+                predecessor == self.signer_contract_id,
+                "Unknown chain key NFT contract",
+            );
+
+            PromiseOrValue::Promise(
+                ext_chain_key_token::ext(env::predecessor_account_id())
+                    .ckt_public_key_for(token_id.clone(), None)
+                    .then(
+                        Self::ext(env::current_account_id()).receive_chain_key_callback(
+                            previous_owner_id,
+                            token_id,
+                            ChainKeyAuthorization::Owned,
+                            msg,
+                        ),
                     ),
-                ),
-        )
+            )
+        }
     }
 }
 
 #[near_bindgen]
 impl Contract {
     #[private]
-    pub fn nft_on_transfer_callback(
+    pub fn receive_chain_key_callback(
         &mut self,
-        #[serializer(borsh)] sender_id: AccountId,
-        #[serializer(borsh)] previous_owner_id: AccountId,
+        #[serializer(borsh)] account_id: AccountId,
         #[serializer(borsh)] token_id: TokenId,
+        #[serializer(borsh)] authorization: ChainKeyAuthorization,
         #[serializer(borsh)] msg: String,
         #[callback_result] result: Result<String, PromiseError>,
     ) -> PromiseOrValue<bool> {
-        let _ = sender_id;
-
         let public_key =
             <EncodedPoint as std::str::FromStr>::from_str(&result.unwrap()).unwrap_or_reject();
 
-        let sent_from_contract_owner = self
-            .own_get_owner()
-            .map_or(false, |owner| owner == previous_owner_id);
+        let sent_from_contract_administrator =
+            <Self as Rbac>::has_role(&account_id, &Role::Administrator);
 
         let marked_as_paymaster_key = || {
             near_sdk::serde_json::from_str::<Nep171ReceiverMsg>(&msg)
                 .map_or(false, |m| m.is_paymaster)
         };
 
-        if sent_from_contract_owner && marked_as_paymaster_key() {
-            self.paymaster_keys
-                .insert(&token_id, &public_key.to_bytes().into_vec());
+        if sent_from_contract_administrator && marked_as_paymaster_key() {
+            self.paymaster_keys.insert(
+                &token_id,
+                &ChainKeyData {
+                    public_key_bytes: public_key.to_bytes().into_vec(),
+                    authorization,
+                },
+            );
         } else {
-            let mut user_chain_keys =
-                self.user_chain_keys
-                    .get(&previous_owner_id)
-                    .unwrap_or_else(|| {
-                        UnorderedMap::new(StorageKey::UserChainKeysFor(previous_owner_id.clone()))
-                    });
+            let mut user_chain_keys = self.user_chain_keys.get(&account_id).unwrap_or_else(|| {
+                UnorderedMap::new(StorageKey::UserChainKeysFor(account_id.clone()))
+            });
 
-            let user_key_token = UserChainKey {
+            let user_key_token = ChainKeyData {
                 public_key_bytes: public_key.to_bytes().into_vec(),
-                authorization: ChainKeyAuthorization::Owned,
+                authorization,
             };
 
             user_chain_keys.insert(&token_id, &user_key_token);
-            self.user_chain_keys
-                .insert(&previous_owner_id, &user_chain_keys);
+            self.user_chain_keys.insert(&account_id, &user_chain_keys);
         }
 
         PromiseOrValue::Value(false)
@@ -149,8 +158,6 @@ impl ChainKeyTokenApprovalReceiver for Contract {
         approval_id: u32,
         msg: String,
     ) -> PromiseOrValue<()> {
-        require!(msg.is_empty(), "Unsupported msg value");
-
         let predecessor = env::predecessor_account_id();
 
         require!(
@@ -162,10 +169,11 @@ impl ChainKeyTokenApprovalReceiver for Contract {
             ext_chain_key_token::ext(predecessor)
                 .ckt_public_key_for(token_id.clone(), None)
                 .then(
-                    Self::ext(env::current_account_id()).ckt_on_approved_callback(
+                    Self::ext(env::current_account_id()).receive_chain_key_callback(
                         approver_id,
                         token_id,
-                        approval_id,
+                        ChainKeyAuthorization::Approved(approval_id),
+                        msg,
                     ),
                 ),
         )
@@ -204,32 +212,5 @@ impl ChainKeyTokenApprovalReceiver for Contract {
         }
 
         PromiseOrValue::Value(())
-    }
-}
-
-#[near_bindgen]
-impl Contract {
-    #[private]
-    pub fn ckt_on_approved_callback(
-        &mut self,
-        #[serializer(borsh)] approver_id: AccountId,
-        #[serializer(borsh)] token_id: String,
-        #[serializer(borsh)] approval_id: u32,
-        #[callback_result] result: Result<String, PromiseError>,
-    ) {
-        let public_key =
-            <EncodedPoint as std::str::FromStr>::from_str(&result.unwrap()).unwrap_or_reject();
-
-        let mut user_chain_keys = self.user_chain_keys.get(&approver_id).unwrap_or_else(|| {
-            UnorderedMap::new(StorageKey::UserChainKeysFor(approver_id.clone()))
-        });
-
-        let user_chain_key = UserChainKey {
-            public_key_bytes: public_key.to_bytes().into_vec(),
-            authorization: ChainKeyAuthorization::Approved(approval_id),
-        };
-
-        user_chain_keys.insert(&token_id, &user_chain_key);
-        self.user_chain_keys.insert(&approver_id, &user_chain_keys);
     }
 }

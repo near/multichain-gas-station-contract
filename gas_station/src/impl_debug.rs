@@ -6,9 +6,9 @@ use near_sdk::{
     serde::{Deserialize, Serialize},
     AccountId,
 };
-use near_sdk_contract_tools::owner::Owner;
+use near_sdk_contract_tools::rbac::Rbac;
 
-use crate::{Contract, ContractExt, Flags, StorageKey, DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS};
+use crate::{Contract, ContractExt, Flags, Role, StorageKey, DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS};
 use lib::{asset::AssetId, oracle::decode_pyth_price_id};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -59,7 +59,11 @@ impl Contract {
                 .map(|(a, s)| (a, decode_pyth_price_id(&s))),
         );
 
-        Owner::update_owner(&mut contract, Some(env::predecessor_account_id()));
+        Rbac::add_role(
+            &mut contract,
+            env::predecessor_account_id(),
+            &Role::Administrator,
+        );
 
         contract
     }

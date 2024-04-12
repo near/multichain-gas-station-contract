@@ -22,8 +22,8 @@ use near_sdk::{
     AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
 #[allow(clippy::wildcard_imports)]
-use near_sdk_contract_tools::{owner::*, pause::*};
-use near_sdk_contract_tools::{standard::nep297::Event, Owner, Pause};
+use near_sdk_contract_tools::pause::*;
+use near_sdk_contract_tools::{rbac::Rbac, standard::nep297::Event, Pause, Rbac};
 use pyth::ext::ext_pyth;
 use schemars::JsonSchema;
 
@@ -144,7 +144,7 @@ pub struct TransactionSequenceCreation {
     Eq,
 )]
 #[serde(crate = "near_sdk::serde")]
-pub struct UserChainKey {
+pub struct ChainKeyData {
     pub public_key_bytes: Vec<u8>,
     pub authorization: ChainKeyAuthorization,
 }
@@ -204,9 +204,15 @@ pub enum StorageKey {
     PaymasterKeys,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize, BorshStorageKey)]
+pub enum Role {
+    Administrator,
+}
+
 // TODO: Cooldown timer/lock on nft keys before they can be returned to the user or used again in the gas station contract to avoid race condition
 // TODO: Storage management
-#[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Owner, Pause)]
+#[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Pause, Rbac)]
+#[rbac(roles = "Role")]
 #[near_bindgen]
 pub struct Contract {
     pub next_unique_id: u64,
@@ -216,8 +222,8 @@ pub struct Contract {
     pub flags: Flags,
     pub expire_sequence_after_blocks: u64,
     pub foreign_chains: UnorderedMap<u64, ChainConfiguration>,
-    pub user_chain_keys: UnorderedMap<AccountId, UnorderedMap<String, UserChainKey>>,
-    pub paymaster_keys: UnorderedMap<String, Vec<u8>>,
+    pub user_chain_keys: UnorderedMap<AccountId, UnorderedMap<String, ChainKeyData>>,
+    pub paymaster_keys: UnorderedMap<String, ChainKeyData>,
     pub sender_whitelist: UnorderedSet<AccountId>,
     pub receiver_whitelist: UnorderedSet<ForeignAddress>,
     pub pending_transaction_sequences: UnorderedMap<u64, PendingTransactionSequence>,
@@ -262,7 +268,11 @@ impl Contract {
                 .map(|(a, s)| (a, decode_pyth_price_id(&s))),
         );
 
-        Owner::init(&mut contract, &env::predecessor_account_id());
+        Rbac::add_role(
+            &mut contract,
+            env::predecessor_account_id(),
+            &Role::Administrator,
+        );
 
         contract
     }
