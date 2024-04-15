@@ -10,7 +10,10 @@ use near_sdk::{
     serde::{Deserialize, Serialize},
     AccountId, Promise, PromiseError, PromiseOrValue,
 };
-use near_sdk_contract_tools::{nft::*, rbac::Rbac};
+use near_sdk_contract_tools::{
+    nft::{ext_nep171, Nep171Receiver, TokenId},
+    rbac::Rbac,
+};
 
 #[allow(unused_imports)]
 use crate::ContractExt;

@@ -19,17 +19,17 @@ impl Contract {
 
         if price_identifier.0 == near_usd {
             Some(pyth::state::Price {
-                price: 718120242.into(),
-                conf: 420242.into(),
+                price: 718_120_242.into(),
+                conf: 420_242.into(),
                 expo: -8,
-                publish_time: 1712830518,
+                publish_time: 1_712_830_518,
             })
         } else if price_identifier.0 == eth_usd {
             Some(pyth::state::Price {
-                price: 357262000000.into(),
-                conf: 135000000.into(),
+                price: 357_262_000_000.into(),
+                conf: 135_000_000.into(),
                 expo: -8,
-                publish_time: 1712830748,
+                publish_time: 1_712_830_748,
             })
         } else {
             None

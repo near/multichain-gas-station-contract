@@ -20,6 +20,7 @@ pub fn sha256(bytes: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[must_use]
 pub fn sha256(bytes: &[u8]) -> Vec<u8> {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
@@ -108,6 +109,11 @@ pub fn get_mpc_address(
     Ok(derive_evm_address_for_account(affine, gas_station_account_id, caller_account_id).into())
 }
 
+/// Calculates the encoded point for a given MPC public key, predecessor, and key path.
+///
+/// # Errors
+///
+/// Returns an error if the public key is not a valid SECP256K1 key.
 pub fn derive_public_key_for(
     mpc_public_key: near_sdk::PublicKey,
     predecessor_account_id: &AccountId,
@@ -129,7 +135,7 @@ fn test_keys() {
     let a = near_public_key_to_affine(public_key.clone()).unwrap();
 
     let encoded = a.to_encoded_point(false);
-    println!("{:x}", encoded);
+    println!("{encoded:x}");
 
     let mpc_address = derive_evm_address_for_account(a, &"canhazgas.testnet".parse().unwrap(), "");
 

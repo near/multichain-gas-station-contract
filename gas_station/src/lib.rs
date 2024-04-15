@@ -232,7 +232,6 @@ pub struct Contract {
     pub collected_fees: UnorderedMap<AssetId, U128>,
 }
 
-#[allow(clippy::needless_pass_by_value)]
 #[near_bindgen]
 impl Contract {
     #[init]

@@ -115,6 +115,7 @@ impl ChainConfiguration {
             Ordering::Less => {
                 conversion_rate.1 *= 10u128.pow(exp.unsigned_abs());
             }
+            #[allow(clippy::cast_sign_loss)]
             Ordering::Greater => {
                 conversion_rate.0 *= 10u128.pow(exp as u32);
             }

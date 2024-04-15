@@ -14,6 +14,13 @@ pyth-near = { git = "https://github.com/pyth-network/pyth-crosschain.git", rev =
 schemars = "0.8.16"
 thiserror = "1"
 
+[workspace.lints.clippy]
+pedantic = "warn"
+missing-panics-doc = "allow"
+module-name-repetitions = "allow"
+must-use-candidate = "allow"
+needless-pass-by-value = "allow"
+
 [profile.release]
 codegen-units = 1
 debug = false

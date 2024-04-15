@@ -20,7 +20,7 @@ impl<T, E: Display> Rejectable<T> for Result<T, E> {
     }
 
     fn expect_or_reject(self, msg: impl Display) -> T {
-        self.unwrap_or_else(|e| env::panic_str(&format!("{}: {e}", msg)))
+        self.unwrap_or_else(|e| env::panic_str(&format!("{msg}: {e}")))
     }
 }
 

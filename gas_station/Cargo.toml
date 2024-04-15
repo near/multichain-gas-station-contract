@@ -26,3 +26,6 @@ debug = []
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true

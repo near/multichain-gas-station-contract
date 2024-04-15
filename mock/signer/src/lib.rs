@@ -7,6 +7,7 @@ use near_sdk::{
     env, near_bindgen, require, AccountId, PromiseOrValue, PublicKey,
 };
 
+#[must_use]
 pub fn construct_spoof_key(
     predecessor: &[u8],
     path: &[u8],
@@ -21,6 +22,7 @@ pub struct MockSignerContract {}
 
 #[near_bindgen]
 impl MockSignerContract {
+    #[must_use]
     pub fn public_key_for(&self, account_id: AccountId, path: String) -> String {
         let signing_key = construct_spoof_key(account_id.as_bytes(), path.as_bytes());
         let verifying_key = signing_key.verifying_key();

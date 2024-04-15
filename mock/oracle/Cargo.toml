@@ -11,3 +11,6 @@ pyth-near = { workspace = true, features = ["library"] }
 
 [lib]
 crate-type = ["cdylib"]
+
+[lints]
+workspace = true

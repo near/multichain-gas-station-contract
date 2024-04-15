@@ -96,6 +96,11 @@ impl ValidTransactionRequest {
         U256(self.max_priority_fee_per_gas)
     }
 
+    /// Attempt to parse the access list.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the access list could not be decoded.
     pub fn access_list(&self) -> Result<AccessList, ethers_core::utils::rlp::DecoderError> {
         AccessList::decode(&Rlp::new(&self.access_list_rlp))
     }

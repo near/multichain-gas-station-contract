@@ -26,15 +26,12 @@ impl Nep141Receiver for Contract {
             return PromiseOrValue::Value(0.into());
         }
 
-        let Nep141ReceiverCreateTransactionArgs {
+        let Ok(Nep141ReceiverCreateTransactionArgs {
             token_id,
             transaction_rlp_hex,
             use_paymaster,
-        } = if let Ok(args) =
-            near_sdk::serde_json::from_str::<Nep141ReceiverCreateTransactionArgs>(&msg)
-        {
-            args
-        } else {
+        }) = near_sdk::serde_json::from_str::<Nep141ReceiverCreateTransactionArgs>(&msg)
+        else {
             return PromiseOrValue::Value(0.into());
         };
 

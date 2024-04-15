@@ -11,3 +11,6 @@ lib = { path = "../../lib" }
 
 [lib]
 crate-type = ["cdylib"]
+
+[lints]
+workspace = true

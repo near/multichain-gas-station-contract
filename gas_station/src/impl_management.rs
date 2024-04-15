@@ -18,7 +18,6 @@ use lib::{
     asset::AssetId, foreign_address::ForeignAddress, oracle::decode_pyth_price_id, Rejectable,
 };
 
-#[allow(clippy::needless_pass_by_value)]
 #[near_bindgen]
 impl Contract {
     pub fn add_administrator(&mut self, account_id: AccountId) {

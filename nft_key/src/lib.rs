@@ -219,6 +219,7 @@ impl NftKeyContract {
     }
 
     #[private]
+    #[must_use]
     pub fn sign_callback(
         &self,
         #[callback_result] result: Result<MpcSignature, PromiseError>,
@@ -362,7 +363,7 @@ impl Hook<NftKeyContract, Nep171Burn<'_>> for NftKeyContract {
         burn: &Nep171Burn<'_>,
         f: impl FnOnce(&mut NftKeyContract) -> R,
     ) -> R {
-        for token_id in burn.token_ids.iter() {
+        for token_id in burn.token_ids {
             contract.ckt_revoke_all(token_id.clone());
         }
         f(contract)

@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_lines)]
+
 use ethers_core::{
     types::transaction::eip2718::TypedTransaction,
     utils::{self, hex, rlp::Rlp},
@@ -259,7 +261,7 @@ async fn test_workflow_happy_path() {
     assert_eq!(result.nonce, 0);
     assert_eq!(
         result.minimum_available_balance,
-        near_sdk::json_types::U128(100000000),
+        near_sdk::json_types::U128(100_000_000),
     );
     assert_eq!(result.token_id, paymaster_key);
     println!("Paymaster configuration check complete.");
@@ -306,27 +308,28 @@ async fn test_workflow_happy_path() {
         .await
         .unwrap();
 
-    #[derive(Deserialize)]
-    #[serde(crate = "near_sdk::serde")]
-    struct Event {
-        data: EventData,
-    }
+    let id = {
+        #[derive(Deserialize)]
+        #[serde(crate = "near_sdk::serde")]
+        struct Event {
+            data: EventData,
+        }
 
-    #[derive(Deserialize)]
-    #[serde(crate = "near_sdk::serde")]
-    struct EventData {
-        id: near_sdk::json_types::U64,
-    }
+        #[derive(Deserialize)]
+        #[serde(crate = "near_sdk::serde")]
+        struct EventData {
+            id: near_sdk::json_types::U64,
+        }
 
-    let id = res
-        .logs()
-        .into_iter()
-        .find_map(|log| {
-            log.strip_prefix("EVENT_JSON:")
-                .and_then(|s| near_sdk::serde_json::from_str(s).ok())
-        })
-        .map(|e: Event| e.data.id)
-        .unwrap();
+        res.logs()
+            .into_iter()
+            .find_map(|log| {
+                log.strip_prefix("EVENT_JSON:")
+                    .and_then(|s| near_sdk::serde_json::from_str(s).ok())
+            })
+            .map(|e: Event| e.data.id)
+            .unwrap()
+    };
 
     assert_eq!(id, 0.into(), "First transaction ID");
 
@@ -425,7 +428,7 @@ async fn test_workflow_happy_path() {
     );
 
     println!("List of signed transactions:");
-    println!("{:?}", signed_transaction_sequences);
+    println!("{signed_transaction_sequences:?}");
 }
 
 #[tokio::test]
@@ -505,7 +508,7 @@ fn generate_eth_rlp_hex() {
     let tx: TypedTransaction = eth_transaction.into();
     let mut sighash = tx.sighash().to_fixed_bytes();
     sighash.reverse();
-    println!("Sighash: {:?}", sighash);
+    println!("Sighash: {sighash:?}");
 }
 
 #[test]

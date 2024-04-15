@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_lines)]
+
 use near_sdk::serde_json::json;
 use near_sdk_contract_tools::nft::Token;
 use near_workspaces::types::NearToken;
@@ -202,7 +204,7 @@ async fn test_nft_key() {
         .unwrap()
         .unwrap();
 
-    println!("Approval succeeded with ID {}", approval_id);
+    println!("Approval succeeded with ID {approval_id}");
 
     println!("Bob attempting to sign with token {token_1_id}...");
     let bob_approved_transaction = bob
