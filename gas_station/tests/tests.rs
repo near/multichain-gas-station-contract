@@ -1,7 +1,7 @@
 #![allow(clippy::too_many_lines)]
 
 use ethers_core::{
-    types::transaction::eip2718::TypedTransaction,
+    types::transaction::{eip1559::Eip1559TransactionRequest, eip2718::TypedTransaction},
     utils::{self, hex, rlp::Rlp},
 };
 use gas_station::{
@@ -234,6 +234,48 @@ async fn setup() -> Setup {
     }
 }
 
+fn construct_eth_transaction(chain_id: u64) -> Eip1559TransactionRequest {
+    Eip1559TransactionRequest {
+        chain_id: Some(chain_id.into()),
+        from: None,
+        to: Some(ForeignAddress([1; 20]).into()),
+        data: None,
+        gas: Some(21000.into()),
+        max_fee_per_gas: Some(100.into()),
+        max_priority_fee_per_gas: Some(100.into()),
+        access_list: vec![].into(),
+        value: Some(100.into()),
+        nonce: Some(0.into()),
+    }
+}
+
+#[tokio::test]
+#[should_panic = "Smart contract panicked: Configuration for chain ID 99999 does not exist"]
+async fn fail_unsupported_chain_id() {
+    let Setup {
+        gas_station,
+        alice,
+        alice_key,
+        ..
+    } = setup().await;
+
+    let eth_transaction = construct_eth_transaction(99999);
+
+    alice
+        .call(gas_station.id(), "create_transaction")
+        .args_json(json!({
+            "token_id": alice_key,
+            "transaction_rlp_hex": hex::encode_prefixed(&eth_transaction.rlp()),
+            "use_paymaster": true,
+        }))
+        .deposit(NearToken::from_near(1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await
+        .unwrap()
+        .unwrap();
+}
+
 #[tokio::test]
 async fn test_workflow_happy_path() {
     let Setup {
@@ -266,18 +308,7 @@ async fn test_workflow_happy_path() {
     assert_eq!(result.token_id, paymaster_key);
     println!("Paymaster configuration check complete.");
 
-    let eth_transaction = ethers_core::types::transaction::eip1559::Eip1559TransactionRequest {
-        chain_id: Some(0.into()),
-        from: None,
-        to: Some(ForeignAddress([1; 20]).into()),
-        data: None,
-        gas: Some(21000.into()),
-        max_fee_per_gas: Some(100.into()),
-        max_priority_fee_per_gas: Some(100.into()),
-        access_list: vec![].into(),
-        value: Some(100.into()),
-        nonce: Some(0.into()),
-    };
+    let eth_transaction = construct_eth_transaction(0);
 
     println!("Testing accepting deposits with NEP-141 token...");
 
@@ -457,7 +488,7 @@ async fn test_nft_keys_approvals_revoked() {
         .unwrap()
         .unwrap();
 
-    let eth_transaction = ethers_core::types::transaction::eip1559::Eip1559TransactionRequest {
+    let eth_transaction = Eip1559TransactionRequest {
         chain_id: Some(0.into()),
         from: None,
         to: Some(ForeignAddress([1; 20]).into()),
@@ -491,7 +522,7 @@ async fn test_nft_keys_approvals_revoked() {
 #[test]
 #[ignore = "generate a payload signable by the contract"]
 fn generate_eth_rlp_hex() {
-    let eth_transaction = ethers_core::types::transaction::eip1559::Eip1559TransactionRequest {
+    let eth_transaction = Eip1559TransactionRequest {
         chain_id: Some(97.into()),
         from: None,
         to: Some(ForeignAddress([0x0f; 20]).into()),
@@ -546,7 +577,7 @@ fn test_derive_address() {
 #[test]
 #[ignore]
 fn test_derive_new_mpc() {
-    let eth_transaction = ethers_core::types::transaction::eip1559::Eip1559TransactionRequest {
+    let eth_transaction = Eip1559TransactionRequest {
         chain_id: Some(0.into()),
         from: None,
         to: Some(ForeignAddress([0x0f; 20]).into()),
