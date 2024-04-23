@@ -15,6 +15,7 @@ This smart contract is a piece of the NEAR Multichain project, which makes NEAR 
 
 - The [MPC recovery service](https://github.com/near/mpc-recovery), also called the "MPC signer service", includes a network of trusted MPC signers, which hold keyshares and cooperatively sign transactions on behalf of the MPC network. It also includes an on-chain component, called the "MPC signer contract," which accepts on-chain signature requests and returns signatures computed by the MPC network.
 - The [multichain relayer server](https://github.com/near/multichain-relayer-server) scans _this_ smart contract for signed transaction payloads and emits them to foreign chain RPCs.
+- The [NFT chain key smart contract](./nft_key/) allows chain keys to be transferred between NEAR accounts, using the [NEP-171 NFT smart contract standard](https://nomicon.io/Standards/Tokens/NonFungibleToken/Core).
 
 ## How does it work?
 
@@ -22,7 +23,7 @@ Currently, relaying one transaction to a foreign chain requires three transactio
 
 Transaction breakdown:
 
-1. The first transaction is a call to the `create_transaction` function. This function accepts an EVM transaction request payload and a deposit amount (to pay for gas on the foreign chain) and returns an `id` and a `pending_transactions_count`.
+1. The first transaction is a call to the `create_transaction` function. This function accepts an EVM transaction request payload, an NFT chain key token ID (must have been previously [approved](./nft_key/README.md#approvals) to the gas station smart contract), and a deposit amount (to pay for gas on the foreign chain) and returns an `id` and a `pending_transactions_count`.
 2. The second transaction is a call to the `sign_next` function. This function accepts the `id` returned in step 1 and returns a signed payload. This payload is the gas funding transaction, transferring funds from a paymaster account on the foreign chain to the user's account on the foreign chain. It must be submitted to the foreign chain before the second signed payload.
 3. The third transaction is another call to the `sign_next` function, identical to the one before. This function accepts an `id` and returns a signed payload. This payload is the signed user transaction.
 
