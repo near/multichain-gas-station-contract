@@ -53,19 +53,20 @@ pub struct ViewPaymasterConfiguration {
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
-pub struct ChainConfiguration {
+pub struct ForeignChainConfiguration {
     pub paymasters: near_sdk::collections::TreeMap<String, PaymasterConfiguration>,
     pub next_paymaster: String,
     pub transfer_gas: [u64; 4],
     pub fee_rate: (u128, u128),
     pub oracle_asset_id: [u8; 32],
+    pub decimals: u8,
 }
 
 #[derive(Debug, Error)]
 #[error("Paymaster with index {0} does not exist")]
 pub struct PaymasterDoesNotExistError(u32);
 
-impl ChainConfiguration {
+impl ForeignChainConfiguration {
     pub fn transfer_gas(&self) -> U256 {
         U256(self.transfer_gas)
     }
@@ -88,28 +89,32 @@ impl ChainConfiguration {
     pub fn token_conversion_price(
         &self,
         quantity_to_convert: U256,
-        from_asset_price: &pyth::state::Price,
-        into_asset_price: &pyth::state::Price,
+        from_asset_price_in_usd: &pyth::state::Price,
+        from_asset_decimals: u8,
+        into_asset_price_in_usd: &pyth::state::Price,
+        into_asset_decimals: u8,
     ) -> u128 {
         // Construct conversion rate
         let mut conversion_rate = (
-            u128::try_from(into_asset_price.price.0)
-                .expect_or_reject("Negative price")
-                .checked_add(
-                    // Pessimistic pricing for the asset we're converting into. (Assume it is more valuable.)
-                    u128::from(into_asset_price.conf.0),
-                )
-                .expect_or_reject("Confidence interval too large"),
-            u128::try_from(from_asset_price.price.0)
+            u128::try_from(from_asset_price_in_usd.price.0)
                 .expect_or_reject("Negative price")
                 .checked_sub(
                     // Pessimistic pricing for the asset we're converting from. (Assume it is less valuable.)
-                    u128::from(from_asset_price.conf.0),
+                    u128::from(from_asset_price_in_usd.conf.0),
+                )
+                .expect_or_reject("Confidence interval too large"),
+            u128::try_from(into_asset_price_in_usd.price.0)
+                .expect_or_reject("Negative price")
+                .checked_add(
+                    // Pessimistic pricing for the asset we're converting into. (Assume it is more valuable.)
+                    u128::from(into_asset_price_in_usd.conf.0),
                 )
                 .expect_or_reject("Confidence interval too large"),
         );
 
-        let exp = into_asset_price.expo - from_asset_price.expo;
+        let exp = from_asset_price_in_usd.expo - into_asset_price_in_usd.expo
+            + i32::from(into_asset_decimals)
+            - i32::from(from_asset_decimals);
 
         match exp.cmp(&0) {
             Ordering::Less => {

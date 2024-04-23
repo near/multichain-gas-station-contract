@@ -9,7 +9,6 @@ use lib::{
     asset::{AssetBalance, AssetId},
     chain_key::ext_chain_key_token,
     foreign_address::ForeignAddress,
-    oracle::decode_pyth_price_id,
     Rejectable,
 };
 use near_sdk::{
@@ -28,7 +27,7 @@ use pyth::ext::ext_pyth;
 use schemars::JsonSchema;
 
 pub mod chain_configuration;
-use chain_configuration::ChainConfiguration;
+use chain_configuration::ForeignChainConfiguration;
 
 pub mod contract_event;
 use contract_event::{ContractEvent, TransactionSequenceCreated, TransactionSequenceSigned};
@@ -198,7 +197,7 @@ pub enum StorageKey {
     PendingTransactionSequences,
     CollectedFees,
     SignedTransactionSequences,
-    SupportedAssets,
+    AcceptedLocalAssets,
     UserChainKeys,
     UserChainKeysFor(AccountId),
     PaymasterKeys,
@@ -207,6 +206,13 @@ pub enum StorageKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize, BorshStorageKey)]
 pub enum Role {
     Administrator,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(crate = "near_sdk::serde")]
+pub struct LocalAssetConfiguration {
+    pub oracle_asset_id: [u8; 32],
+    pub decimals: u8,
 }
 
 // TODO: Cooldown timer/lock on nft keys before they can be returned to the user or used again in the gas station contract to avoid race condition
@@ -218,10 +224,10 @@ pub struct Contract {
     pub next_unique_id: u64,
     pub signer_contract_id: AccountId,
     pub oracle_id: AccountId,
-    pub supported_assets_oracle_asset_ids: UnorderedMap<AssetId, [u8; 32]>,
+    pub accepted_local_assets: UnorderedMap<AssetId, LocalAssetConfiguration>,
     pub flags: Flags,
     pub expire_sequence_after_blocks: u64,
-    pub foreign_chains: UnorderedMap<u64, ChainConfiguration>,
+    pub foreign_chains: UnorderedMap<u64, ForeignChainConfiguration>,
     pub user_chain_keys: UnorderedMap<AccountId, UnorderedMap<String, ChainKeyData>>,
     pub paymaster_keys: UnorderedMap<String, ChainKeyData>,
     pub sender_whitelist: UnorderedSet<AccountId>,
@@ -238,14 +244,13 @@ impl Contract {
     pub fn new(
         signer_contract_id: AccountId,
         oracle_id: AccountId,
-        supported_assets_oracle_asset_ids: Vec<(AssetId, String)>,
         expire_sequence_after_blocks: Option<U64>,
     ) -> Self {
         let mut contract = Self {
             next_unique_id: 0,
             signer_contract_id,
             oracle_id,
-            supported_assets_oracle_asset_ids: UnorderedMap::new(StorageKey::SupportedAssets),
+            accepted_local_assets: UnorderedMap::new(StorageKey::AcceptedLocalAssets),
             flags: Flags::default(),
             expire_sequence_after_blocks: expire_sequence_after_blocks
                 .map_or(DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS, u64::from),
@@ -260,12 +265,6 @@ impl Contract {
             signed_transaction_sequences: Vector::new(StorageKey::SignedTransactionSequences),
             collected_fees: UnorderedMap::new(StorageKey::CollectedFees),
         };
-
-        contract.supported_assets_oracle_asset_ids.extend(
-            supported_assets_oracle_asset_ids
-                .into_iter()
-                .map(|(a, s)| (a, decode_pyth_price_id(&s))),
-        );
 
         Rbac::add_role(
             &mut contract,
@@ -326,8 +325,8 @@ impl Contract {
         if use_paymaster {
             require!(deposit.amount.0 > 0, "Deposit is required to pay for gas");
 
-            let supported_asset_oracle_asset_id = self
-                .supported_assets_oracle_asset_ids
+            let accepted_local_asset = self
+                .accepted_local_assets
                 .get(&deposit.asset_id)
                 .expect_or_reject("Unsupported deposit asset");
 
@@ -336,7 +335,7 @@ impl Contract {
 
             ext_pyth::ext(self.oracle_id.clone())
                 .get_price(pyth::state::PriceIdentifier(
-                    supported_asset_oracle_asset_id,
+                    accepted_local_asset.oracle_asset_id,
                 ))
                 .and(
                     ext_pyth::ext(self.oracle_id.clone()).get_price(pyth::state::PriceIdentifier(
@@ -409,24 +408,26 @@ impl Contract {
         let request_tokens_for_gas = (transaction_request.gas() + paymaster_transaction_gas)
             * transaction_request.max_fee_per_gas(); // Validation ensures gas is set.
 
+        let accepted_local_asset = self
+            .accepted_local_assets
+            .get(&deposit.asset_id)
+            .unwrap_or_reject();
+
         let fee = foreign_chain_configuration.token_conversion_price(
             request_tokens_for_gas,
             &price_data_foreign,
+            foreign_chain_configuration.decimals,
             &price_data_local,
+            accepted_local_asset.decimals,
         );
         let deposit_amount = deposit.amount.0;
+        let refund = deposit_amount
+            .checked_sub(fee)
+            .expect_or_reject("Attached deposit is less than fee");
 
-        match deposit_amount.checked_sub(fee) {
-            None => {
-                env::panic_str(&format!(
-                    "Attached deposit ({deposit_amount}) is less than fee ({fee})"
-                ));
-            }
-            Some(0) => {} // No refund; payment is exact.
-            Some(refund) => {
-                // Refund excess
-                deposit.asset_id.transfer(sender.clone(), refund);
-            }
+        if refund > 0 {
+            // Refund excess
+            deposit.asset_id.transfer(sender.clone(), refund);
         }
 
         let mut paymaster = foreign_chain_configuration
@@ -457,10 +458,7 @@ impl Contract {
             max_fee_per_gas: transaction_request.max_fee_per_gas,
         };
 
-        paymaster.minimum_available_balance = U256(paymaster.minimum_available_balance)
-            .checked_sub(request_tokens_for_gas)
-            .expect_or_reject("Paymaster does not have enough funds")
-            .0;
+        paymaster.deduct(request_tokens_for_gas);
 
         foreign_chain_configuration
             .paymasters
@@ -735,7 +733,7 @@ impl Contract {
     fn with_mut_chain<R>(
         &mut self,
         chain_id: u64,
-        f: impl FnOnce(&mut ChainConfiguration) -> R,
+        f: impl FnOnce(&mut ForeignChainConfiguration) -> R,
     ) -> R {
         let mut config = self
             .foreign_chains
@@ -749,7 +747,7 @@ impl Contract {
     fn get_chain(
         &self,
         chain_id: u64,
-    ) -> Result<ChainConfiguration, ChainConfigurationDoesNotExistError> {
+    ) -> Result<ForeignChainConfiguration, ChainConfigurationDoesNotExistError> {
         self.foreign_chains
             .get(&chain_id)
             .ok_or(ChainConfigurationDoesNotExistError { chain_id })

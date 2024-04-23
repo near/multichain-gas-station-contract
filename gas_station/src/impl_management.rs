@@ -8,11 +8,14 @@ use near_sdk::{
 use near_sdk_contract_tools::{pause::Pause, rbac::Rbac};
 
 use crate::{
-    chain_configuration::{ChainConfiguration, PaymasterConfiguration, ViewPaymasterConfiguration},
+    chain_configuration::{
+        ForeignChainConfiguration, PaymasterConfiguration, ViewPaymasterConfiguration,
+    },
     contract_event::TransactionSequenceSigned,
     decode_transaction_request,
     valid_transaction_request::ValidTransactionRequest,
-    Contract, ContractExt, Flags, GetForeignChain, PendingTransactionSequence, Role, StorageKey,
+    Contract, ContractExt, Flags, GetForeignChain, LocalAssetConfiguration,
+    PendingTransactionSequence, Role, StorageKey,
 };
 use lib::{
     asset::AssetId, foreign_address::ForeignAddress, oracle::decode_pyth_price_id, Rejectable,
@@ -117,23 +120,54 @@ impl Contract {
         self.sender_whitelist.clear();
     }
 
+    pub fn add_accepted_local_asset(
+        &mut self,
+        asset_id: AssetId,
+        oracle_asset_id: String,
+        decimals: u8,
+    ) {
+        <Self as Rbac>::require_role(&Role::Administrator);
+        self.accepted_local_assets.insert(
+            &asset_id,
+            &LocalAssetConfiguration {
+                oracle_asset_id: decode_pyth_price_id(&oracle_asset_id),
+                decimals,
+            },
+        );
+    }
+
+    pub fn remove_accepted_local_asset(&mut self, asset_id: AssetId) {
+        <Self as Rbac>::require_role(&Role::Administrator);
+        self.accepted_local_assets
+            .remove(&asset_id)
+            .expect_or_reject("Asset not found");
+    }
+
+    pub fn get_accepted_local_asset(&self, asset_id: AssetId) -> LocalAssetConfiguration {
+        self.accepted_local_assets
+            .get(&asset_id)
+            .expect_or_reject("Asset not found")
+    }
+
     pub fn add_foreign_chain(
         &mut self,
         chain_id: U64,
         oracle_asset_id: String,
         transfer_gas: U128,
         fee_rate: (U128, U128),
+        decimals: u8,
     ) {
         <Self as Rbac>::require_role(&Role::Administrator);
 
         self.foreign_chains.insert(
             &chain_id.0,
-            &ChainConfiguration {
+            &ForeignChainConfiguration {
                 next_paymaster: String::new(),
                 oracle_asset_id: decode_pyth_price_id(&oracle_asset_id),
                 transfer_gas: U256::from(transfer_gas.0).0,
                 fee_rate: (fee_rate.0.into(), fee_rate.1.into()),
                 paymasters: TreeMap::new(StorageKey::Paymasters(chain_id.0)),
+                decimals,
             },
         );
     }
@@ -353,7 +387,9 @@ impl Contract {
         &self,
         transaction_rlp_hex: String,
         local_asset_price: pyth::state::Price,
+        local_asset_decimals: u8,
         foreign_asset_price: pyth::state::Price,
+        foreign_asset_decimals: u8,
     ) -> U128 {
         let transaction =
             ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
@@ -369,7 +405,9 @@ impl Contract {
             .token_conversion_price(
                 request_tokens_for_gas,
                 &foreign_asset_price,
+                foreign_asset_decimals,
                 &local_asset_price,
+                local_asset_decimals,
             )
             .into()
     }

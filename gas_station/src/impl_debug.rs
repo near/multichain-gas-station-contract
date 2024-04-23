@@ -9,7 +9,6 @@ use near_sdk::{
 use near_sdk_contract_tools::rbac::Rbac;
 
 use crate::{Contract, ContractExt, Flags, Role, StorageKey, DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS};
-use lib::{asset::AssetId, oracle::decode_pyth_price_id};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(crate = "near_sdk::serde")]
@@ -30,14 +29,13 @@ impl Contract {
     pub fn new_debug(
         signer_contract_id: AccountId,
         oracle_id: AccountId,
-        supported_assets_oracle_asset_ids: Vec<(AssetId, String)>,
         expire_sequence_after_blocks: Option<U64>,
     ) -> Self {
         let mut contract = Self {
             next_unique_id: 0,
             signer_contract_id,
             oracle_id,
-            supported_assets_oracle_asset_ids: UnorderedMap::new(StorageKey::SupportedAssets),
+            accepted_local_assets: UnorderedMap::new(StorageKey::AcceptedLocalAssets),
             flags: Flags::default(),
             expire_sequence_after_blocks: expire_sequence_after_blocks
                 .map_or(DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS, u64::from),
@@ -52,12 +50,6 @@ impl Contract {
             signed_transaction_sequences: Vector::new(StorageKey::SignedTransactionSequences),
             collected_fees: UnorderedMap::new(StorageKey::CollectedFees),
         };
-
-        contract.supported_assets_oracle_asset_ids.extend(
-            supported_assets_oracle_asset_ids
-                .into_iter()
-                .map(|(a, s)| (a, decode_pyth_price_id(&s))),
-        );
 
         Rbac::add_role(
             &mut contract,

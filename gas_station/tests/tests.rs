@@ -1,7 +1,10 @@
 #![allow(clippy::too_many_lines)]
 
 use ethers_core::{
-    types::transaction::{eip1559::Eip1559TransactionRequest, eip2718::TypedTransaction},
+    types::{
+        transaction::{eip1559::Eip1559TransactionRequest, eip2718::TypedTransaction},
+        U256,
+    },
     utils::{self, hex, rlp::Rlp},
 };
 use gas_station::{
@@ -12,10 +15,10 @@ use lib::{
     asset::AssetId,
     foreign_address::ForeignAddress,
     kdf::get_mpc_address,
-    oracle::{PYTH_PRICE_ID_ETH_USD, PYTH_PRICE_ID_NEAR_USD},
+    oracle::{decode_pyth_price_id, PYTH_PRICE_ID_ETH_USD, PYTH_PRICE_ID_NEAR_USD},
     signer::MpcSignature,
 };
-use near_sdk::{serde::Deserialize, serde_json::json};
+use near_sdk::{json_types::U128, serde::Deserialize, serde_json::json};
 use near_workspaces::{
     network::Sandbox,
     operations::Function,
@@ -105,16 +108,23 @@ async fn setup() -> Setup {
         .call(Function::new("new").args_json(json!({
             "signer_contract_id": nft_key.id(),
             "oracle_id": oracle.id(),
-            "supported_assets_oracle_asset_ids": [
-                [AssetId::Native, PYTH_PRICE_ID_NEAR_USD],
-                [AssetId::Nep141(local_ft.id().as_str().parse().unwrap()), PYTH_PRICE_ID_ETH_USD],
-            ],
+        })))
+        .call(Function::new("add_accepted_local_asset").args_json(json!({
+            "asset_id": AssetId::Native,
+            "oracle_asset_id": PYTH_PRICE_ID_NEAR_USD,
+            "decimals": 24,
+        })))
+        .call(Function::new("add_accepted_local_asset").args_json(json!({
+            "asset_id": AssetId::Nep141(local_ft.id().as_str().parse().unwrap()),
+            "oracle_asset_id": PYTH_PRICE_ID_ETH_USD,
+            "decimals": 18,
         })))
         .call(Function::new("add_foreign_chain").args_json(json!({
             "chain_id": "0",
             "oracle_asset_id": PYTH_PRICE_ID_ETH_USD,
             "transfer_gas": "21000",
             "fee_rate": ["120", "100"],
+            "decimals": 18,
         })))
         .transact()
         .await
@@ -181,7 +191,7 @@ async fn setup() -> Setup {
         .call(gas_station.id(), "add_paymaster")
         .args_json(json!({
             "chain_id": "0",
-            "balance": "100000000",
+            "balance": U128(10 * 10u128.pow(18)),
             "nonce": 0,
             "token_id": paymaster_key,
         }))
@@ -241,12 +251,181 @@ fn construct_eth_transaction(chain_id: u64) -> Eip1559TransactionRequest {
         to: Some(ForeignAddress([1; 20]).into()),
         data: None,
         gas: Some(21000.into()),
-        max_fee_per_gas: Some(100.into()),
-        max_priority_fee_per_gas: Some(100.into()),
+        max_fee_per_gas: Some(15_000_000_000u128.into()),
+        max_priority_fee_per_gas: Some(50_000_000u128.into()),
         access_list: vec![].into(),
         value: Some(100.into()),
         nonce: Some(0.into()),
     }
+}
+
+#[tokio::test]
+#[should_panic = "Smart contract panicked: Attached deposit is less than fee"]
+async fn fail_price_estimation_minus_one_is_insufficient() {
+    let Setup {
+        gas_station,
+        oracle,
+        alice,
+        alice_key,
+        ..
+    } = setup().await;
+
+    let eth_transaction = construct_eth_transaction(0);
+
+    let (local_asset_price, foreign_asset_price) = tokio::join!(
+        async {
+            oracle
+                .view("get_price")
+                .args_json(json!({
+                    "price_identifier": pyth::state::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
+                }))
+                .await
+                .unwrap()
+                .json::<pyth::state::Price>()
+                .unwrap()
+        },
+        async {
+            oracle
+                .view("get_price")
+                .args_json(json!({
+                    "price_identifier": pyth::state::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
+                }))
+                .await
+                .unwrap()
+                .json::<pyth::state::Price>()
+                .unwrap()
+        },
+    );
+
+    let price_estimation = gas_station
+        .view("estimate_gas_cost")
+        .args_json(json!({
+            "transaction_rlp_hex": hex::encode_prefixed(&eth_transaction.rlp()),
+            "local_asset_price": local_asset_price,
+            "local_asset_decimals": 24,
+            "foreign_asset_price": foreign_asset_price,
+            "foreign_asset_decimals": 18,
+        }))
+        .await
+        .unwrap()
+        .json::<U128>()
+        .unwrap()
+        .0;
+
+    alice
+        .call(gas_station.id(), "create_transaction")
+        .args_json(json!({
+            "token_id": alice_key,
+            "transaction_rlp_hex": hex::encode_prefixed(&eth_transaction.rlp()),
+            "use_paymaster": true,
+        }))
+        .deposit(NearToken::from_yoctonear(price_estimation - 1))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await
+        .unwrap()
+        .json::<TransactionSequenceCreation>()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_price_estimation() {
+    let Setup {
+        gas_station,
+        oracle,
+        alice,
+        alice_key,
+        ..
+    } = setup().await;
+
+    let eth_transaction = construct_eth_transaction(0);
+
+    let (local_asset_price, foreign_asset_price) = tokio::join!(
+        async {
+            oracle
+                .view("get_price")
+                .args_json(json!({
+                    "price_identifier": pyth::state::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
+                }))
+                .await
+                .unwrap()
+                .json::<pyth::state::Price>()
+                .unwrap()
+        },
+        async {
+            oracle
+                .view("get_price")
+                .args_json(json!({
+                    "price_identifier": pyth::state::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
+                }))
+                .await
+                .unwrap()
+                .json::<pyth::state::Price>()
+                .unwrap()
+        },
+    );
+
+    let price_estimation = gas_station
+        .view("estimate_gas_cost")
+        .args_json(json!({
+            "transaction_rlp_hex": hex::encode_prefixed(&eth_transaction.rlp()),
+            "local_asset_price": local_asset_price,
+            "local_asset_decimals": 24,
+            "foreign_asset_price": foreign_asset_price,
+            "foreign_asset_decimals": 18,
+        }))
+        .await
+        .unwrap()
+        .json::<U128>()
+        .unwrap()
+        .0;
+
+    let overall_exponent = foreign_asset_price.expo - local_asset_price.expo + 24 - 18;
+    // wei * usd_eth / (10**18) / (usd_near / (10**24))
+
+    let expected_total_maximum_gas_spend_in_eth = (eth_transaction.gas.unwrap()
+        + U256::from(21000u128))
+        * eth_transaction.max_fee_per_gas.unwrap();
+    #[allow(clippy::cast_sign_loss)]
+    let expected_total_maximum_gas_spend_in_near = {
+        let mut numerator = expected_total_maximum_gas_spend_in_eth
+            * (foreign_asset_price.price.0 as u64 - foreign_asset_price.conf.0)
+            * 120u64;
+        let mut denominator =
+            U256::from(local_asset_price.price.0 as u64 + local_asset_price.conf.0) * 100u64;
+
+        if overall_exponent < 0 {
+            denominator *= 10u64.pow(-overall_exponent as u32);
+        } else {
+            numerator *= 10u64.pow(overall_exponent as u32);
+        }
+
+        let (t, r) = numerator.div_mod(denominator);
+
+        if r.is_zero() {
+            t
+        } else {
+            t + 1
+        }
+    }
+    .as_u128();
+
+    assert_eq!(price_estimation, expected_total_maximum_gas_spend_in_near);
+
+    alice
+        .call(gas_station.id(), "create_transaction")
+        .args_json(json!({
+            "token_id": alice_key,
+            "transaction_rlp_hex": hex::encode_prefixed(&eth_transaction.rlp()),
+            "use_paymaster": true,
+        }))
+        .deposit(NearToken::from_yoctonear(price_estimation))
+        .gas(Gas::from_tgas(50))
+        .transact()
+        .await
+        .unwrap()
+        .json::<TransactionSequenceCreation>()
+        .unwrap();
 }
 
 #[tokio::test]
@@ -303,7 +482,7 @@ async fn test_workflow_happy_path() {
     assert_eq!(result.nonce, 0);
     assert_eq!(
         result.minimum_available_balance,
-        near_sdk::json_types::U128(100_000_000),
+        near_sdk::json_types::U128(10_000_000_000_000_000_000),
     );
     assert_eq!(result.token_id, paymaster_key);
     println!("Paymaster configuration check complete.");
@@ -553,7 +732,7 @@ fn decode_rlp() {
     // user to: (junk)
 
     let bytes = hex::decode(
-        "0x02f86a618222bb8204d28204d2825208940f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f8204d280c001a01e9f894cdcb789c70d959c44eaa8f2430856fb641e6712638635d25ca47c3cefa0514ac820e7228b6a07d849d614be54099f6cfa890d417924c830108448f8f995",
+        "0x02f872011a8402faf08085037e11d60082520894b9a07c631d10fdce87d37eb6f18c11cbe75f1eeb878e1bc9bf04000080c001a05861ee93132033ed723d5bceb606c68f2107fc4f5ad1c36edbbf64b026381b0aa02e4398767b401a3faec153b95e639695077248b88991b57a1954a3505d998f15",
     )
     .unwrap();
 

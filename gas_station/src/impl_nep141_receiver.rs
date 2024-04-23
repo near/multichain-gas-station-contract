@@ -16,10 +16,7 @@ impl Nep141Receiver for Contract {
 
         let asset_id = AssetId::Nep141(env::predecessor_account_id());
 
-        let asset_is_supported = self
-            .supported_assets_oracle_asset_ids
-            .get(&asset_id)
-            .is_some();
+        let asset_is_supported = self.accepted_local_assets.get(&asset_id).is_some();
 
         if !asset_is_supported {
             // Unknown assets: ignore.
