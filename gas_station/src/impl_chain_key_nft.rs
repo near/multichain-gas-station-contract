@@ -89,25 +89,20 @@ impl Contract {
                 .map_or(false, |m| m.is_paymaster)
         };
 
+        let public_key_bytes = public_key.to_bytes().into_vec();
+        let key_data = ChainKeyData {
+            public_key_bytes,
+            authorization,
+        };
+
         if sent_from_contract_administrator && marked_as_paymaster_key() {
-            self.paymaster_keys.insert(
-                &token_id,
-                &ChainKeyData {
-                    public_key_bytes: public_key.to_bytes().into_vec(),
-                    authorization,
-                },
-            );
+            self.paymaster_keys.insert(&token_id, &key_data);
         } else {
             let mut user_chain_keys = self.user_chain_keys.get(&account_id).unwrap_or_else(|| {
                 UnorderedMap::new(StorageKey::UserChainKeysFor(account_id.clone()))
             });
 
-            let user_key_token = ChainKeyData {
-                public_key_bytes: public_key.to_bytes().into_vec(),
-                authorization,
-            };
-
-            user_chain_keys.insert(&token_id, &user_key_token);
+            user_chain_keys.insert(&token_id, &key_data);
             self.user_chain_keys.insert(&account_id, &user_chain_keys);
         }
 
