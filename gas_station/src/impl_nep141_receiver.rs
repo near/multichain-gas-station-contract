@@ -12,6 +12,8 @@ impl Nep141Receiver for Contract {
         amount: U128,
         msg: String,
     ) -> PromiseOrValue<U128> {
+        self.require_unpaused_or_administrator(&sender_id);
+
         // TODO: Some way to inform the sender_id of the transaction ID that just got created
 
         let asset_id = AssetId::Nep141(env::predecessor_account_id());

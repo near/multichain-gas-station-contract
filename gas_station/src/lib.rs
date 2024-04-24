@@ -730,6 +730,13 @@ pub struct SignatureRequestDoesNoteExistError {
 }
 
 impl Contract {
+    #[allow(clippy::unused_self)]
+    fn require_unpaused_or_administrator(&self, account_id: &AccountId) {
+        if !<Self as Rbac>::has_role(account_id, &Role::Administrator) {
+            <Self as Pause>::require_unpaused();
+        }
+    }
+
     fn with_mut_chain<R>(
         &mut self,
         chain_id: u64,

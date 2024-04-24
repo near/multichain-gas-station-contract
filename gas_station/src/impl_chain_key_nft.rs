@@ -34,6 +34,8 @@ impl Nep171Receiver for Contract {
         token_id: TokenId,
         msg: String,
     ) -> PromiseOrValue<bool> {
+        self.require_unpaused_or_administrator(&sender_id);
+
         #[cfg(feature = "debug")]
         {
             let _ = (sender_id, previous_owner_id, token_id, msg);
@@ -111,6 +113,7 @@ impl Contract {
 
     pub fn recover_nft_key(&mut self, token_id: TokenId, msg: Option<String>) -> Promise {
         let predecessor = env::predecessor_account_id();
+        self.require_unpaused_or_administrator(&predecessor);
 
         let mut user_keys = self
             .user_chain_keys
@@ -156,6 +159,8 @@ impl ChainKeyTokenApprovalReceiver for Contract {
         approval_id: u32,
         msg: String,
     ) -> PromiseOrValue<()> {
+        self.require_unpaused_or_administrator(&approver_id);
+
         let predecessor = env::predecessor_account_id();
 
         require!(
