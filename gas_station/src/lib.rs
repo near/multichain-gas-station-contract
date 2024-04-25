@@ -1,9 +1,6 @@
 use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, U256},
-    utils::{
-        hex,
-        rlp::{Decodable, Rlp},
-    },
+    types::{transaction::eip2718::TypedTransaction, U256},
+    utils::hex,
 };
 use lib::{
     asset::{AssetBalance, AssetId},
@@ -39,12 +36,15 @@ mod impl_debug;
 mod impl_management;
 mod impl_nep141_receiver;
 
+pub mod signature_request;
+use signature_request::{SignatureRequest, Status};
+
+mod utils;
+use utils::{decode_transaction_request, sighash_for_mpc_signing};
+
 pub mod valid_transaction_request;
 use thiserror::Error;
 use valid_transaction_request::ValidTransactionRequest;
-
-pub mod signature_request;
-use signature_request::{SignatureRequest, Status};
 
 const DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS: u64 = 5 * 60; // 5ish minutes at 1s/block
 
@@ -420,8 +420,9 @@ impl Contract {
             &price_data_local,
             accepted_local_asset.decimals,
         );
-        let deposit_amount = deposit.amount.0;
-        let refund = deposit_amount
+        let refund = deposit
+            .amount
+            .0
             .checked_sub(fee)
             .expect_or_reject("Attached deposit is less than fee");
 
@@ -444,10 +445,8 @@ impl Contract {
         let sender_foreign_address =
             ForeignAddress::from_raw_public_key(&user_key.public_key_bytes);
 
-        let chain_id = transaction_request.chain_id;
-
         let paymaster_transaction = ValidTransactionRequest {
-            chain_id,
+            chain_id: transaction_request.chain_id,
             to: sender_foreign_address,
             value: request_tokens_for_gas.0,
             gas: paymaster_transaction_gas.0,
@@ -469,7 +468,7 @@ impl Contract {
         let paymaster_authorization = self
             .paymaster_keys
             .get(&paymaster.token_id)
-            .unwrap_or_reject()
+            .unwrap_or_reject() // inconsistent state if this fails
             .authorization;
 
         let signature_requests = vec![
@@ -501,7 +500,7 @@ impl Contract {
 
         ContractEvent::TransactionSequenceCreated(TransactionSequenceCreated {
             id: creation.id,
-            foreign_chain_id: chain_id.to_string(),
+            foreign_chain_id: transaction_request.chain_id.to_string(),
             pending_transaction_sequence,
         })
         .emit();
@@ -543,22 +542,12 @@ impl Contract {
 
         next_signature_request.status = Status::InFlight;
 
-        let payload = {
-            let mut sighash = <TypedTransaction as From<ValidTransactionRequest>>::from(
-                next_signature_request.transaction.clone(),
-            )
-            .sighash()
-            .to_fixed_bytes();
-            sighash.reverse();
-            sighash
-        };
-
         #[allow(clippy::cast_possible_truncation)]
         let ret = ext_chain_key_token::ext(self.signer_contract_id.clone()) // TODO: Gas.
             .ckt_sign_hash(
                 next_signature_request.token_id.clone(),
                 None,
-                payload.to_vec(),
+                sighash_for_mpc_signing(next_signature_request.transaction.clone()).to_vec(),
                 next_signature_request.authorization.to_approval_id(),
             )
             .then(
@@ -804,12 +793,4 @@ impl Contract {
             pending_signature_count,
         }
     }
-}
-
-fn decode_transaction_request(rlp_hex: &str) -> Eip1559TransactionRequest {
-    let rlp_bytes =
-        hex::decode(rlp_hex).expect_or_reject("Error decoding `transaction_rlp` as hex");
-    let rlp = Rlp::new(&rlp_bytes);
-    Eip1559TransactionRequest::decode(&rlp)
-        .expect_or_reject("Error decoding `transaction_rlp` as transaction request RLP")
 }
