@@ -104,6 +104,7 @@ async fn test_nft_key() {
                     "token_id": token_1_id,
                     "payload": msg_1,
                 }))
+                .deposit(NearToken::from_yoctonear(1))
                 .max_gas()
                 .transact()
                 .await
@@ -117,6 +118,7 @@ async fn test_nft_key() {
                     "token_id": token_2_id,
                     "payload": msg_2,
                 }))
+                .deposit(NearToken::from_yoctonear(1))
                 .max_gas()
                 .transact()
                 .await
@@ -179,6 +181,7 @@ async fn test_nft_key() {
             "token_id": token_2_id,
             "payload": msg_2,
         }))
+        .deposit(NearToken::from_yoctonear(1))
         .max_gas()
         .transact()
         .await
@@ -196,6 +199,7 @@ async fn test_nft_key() {
             "token_id": token_1_id,
             "account_id": bob.id(),
         }))
+        .deposit(NearToken::from_yoctonear(1))
         .max_gas()
         .transact()
         .await
@@ -214,6 +218,7 @@ async fn test_nft_key() {
             "payload": msg_1,
             "approval_id": approval_id,
         }))
+        .deposit(NearToken::from_yoctonear(1))
         .max_gas()
         .transact()
         .await
@@ -231,6 +236,7 @@ async fn test_nft_key() {
             "token_id": token_1_id,
             "account_id": bob.id(),
         }))
+        .deposit(NearToken::from_yoctonear(1))
         .max_gas()
         .transact()
         .await
@@ -246,6 +252,7 @@ async fn test_nft_key() {
             "token_id": token_1_id,
             "payload": msg_1,
         }))
+        .deposit(NearToken::from_yoctonear(1))
         .max_gas()
         .transact()
         .await
@@ -333,6 +340,7 @@ async fn test_nft_key_sub_path() {
                     "token_id": token_1_id,
                     "payload": msg_1,
                 }))
+                .deposit(NearToken::from_yoctonear(1))
                 .max_gas()
                 .transact()
                 .await
@@ -348,6 +356,7 @@ async fn test_nft_key_sub_path() {
                     "payload": msg_1,
                     "path": "a",
                 }))
+                .deposit(NearToken::from_yoctonear(1))
                 .max_gas()
                 .transact()
                 .await
@@ -363,6 +372,7 @@ async fn test_nft_key_sub_path() {
                     "payload": msg_1,
                     "path": "b",
                 }))
+                .deposit(NearToken::from_yoctonear(1))
                 .max_gas()
                 .transact()
                 .await

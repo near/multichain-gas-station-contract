@@ -180,6 +180,7 @@ async fn setup() -> Setup {
                 is_paymaster: true,
             }).unwrap(),
         }))
+        .deposit(NearToken::from_yoctonear(1))
         .max_gas()
         .transact()
         .await
@@ -220,8 +221,7 @@ async fn setup() -> Setup {
             "account_id": gas_station.id(),
             "token_id": alice_key,
         }))
-        // TODO: Should this function requrie a 1-yocto deposit?
-        // .deposit(NearToken::from_yoctonear(1))
+        .deposit(NearToken::from_yoctonear(1))
         .max_gas()
         .transact()
         .await
@@ -657,8 +657,7 @@ async fn test_nft_keys_approvals_revoked() {
             "account_id": gas_station.id(),
             "token_id": alice_key,
         }))
-        // TODO: Should this function requrie a 1-yocto deposit?
-        // .deposit(NearToken::from_yoctonear(1))
+        .deposit(NearToken::from_yoctonear(1))
         .max_gas()
         .transact()
         .await

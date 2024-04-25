@@ -4,6 +4,7 @@ use lib::{
     Rejectable,
 };
 use near_sdk::{
+    assert_one_yocto,
     borsh::{self, BorshDeserialize, BorshSerialize},
     collections::UnorderedMap,
     env, near_bindgen, require, AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError,
@@ -112,6 +113,7 @@ impl NftKeyContract {
 
 #[near_bindgen]
 impl ChainKeyToken for NftKeyContract {
+    #[payable]
     fn ckt_sign_hash(
         &mut self,
         token_id: TokenId,
@@ -119,6 +121,8 @@ impl ChainKeyToken for NftKeyContract {
         payload: Vec<u8>,
         approval_id: Option<u32>,
     ) -> PromiseOrValue<String> {
+        assert_one_yocto();
+
         let id = token_id.parse().expect_or_reject("Invalid token ID");
         let path = path.unwrap_or_default();
 
@@ -281,19 +285,23 @@ impl NftKeyContract {
 
 #[near_bindgen]
 impl ChainKeyTokenApproval for NftKeyContract {
+    #[payable]
     fn ckt_approve(&mut self, token_id: TokenId, account_id: AccountId) -> u32 {
+        assert_one_yocto();
         let predecessor = env::predecessor_account_id();
         self.require_is_token_owner(&predecessor, &token_id);
         let id = token_id.parse().expect_or_reject("Invalid token ID");
         self.approve(id, &account_id)
     }
 
+    #[payable]
     fn ckt_approve_call(
         &mut self,
         token_id: String,
         account_id: AccountId,
         msg: Option<String>,
     ) -> PromiseOrValue<Option<u32>> {
+        assert_one_yocto();
         let predecessor = env::predecessor_account_id();
         self.require_is_token_owner(&predecessor, &token_id);
         let id = token_id.parse().expect_or_reject("Invalid token ID");
@@ -310,19 +318,23 @@ impl ChainKeyTokenApproval for NftKeyContract {
         )
     }
 
+    #[payable]
     fn ckt_revoke(&mut self, token_id: TokenId, account_id: AccountId) {
+        assert_one_yocto();
         let predecessor = env::predecessor_account_id();
         self.require_is_token_owner(&predecessor, &token_id);
         let id = token_id.parse().expect_or_reject("Invalid token ID");
         self.revoke(id, &account_id);
     }
 
+    #[payable]
     fn ckt_revoke_call(
         &mut self,
         token_id: String,
         account_id: AccountId,
         msg: Option<String>,
     ) -> PromiseOrValue<()> {
+        assert_one_yocto();
         let predecessor = env::predecessor_account_id();
         self.require_is_token_owner(&predecessor, &token_id);
         let id = token_id.parse().expect_or_reject("Invalid token ID");
@@ -344,7 +356,9 @@ impl ChainKeyTokenApproval for NftKeyContract {
         }
     }
 
+    #[payable]
     fn ckt_revoke_all(&mut self, token_id: TokenId) -> near_sdk::json_types::U64 {
+        assert_one_yocto();
         let predecessor = env::predecessor_account_id();
         self.require_is_token_owner(&predecessor, &token_id);
 

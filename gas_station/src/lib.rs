@@ -544,6 +544,7 @@ impl Contract {
 
         #[allow(clippy::cast_possible_truncation)]
         let ret = ext_chain_key_token::ext(self.signer_contract_id.clone()) // TODO: Gas.
+            .with_attached_deposit(1)
             .ckt_sign_hash(
                 next_signature_request.token_id.clone(),
                 None,
