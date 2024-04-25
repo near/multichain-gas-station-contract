@@ -19,13 +19,15 @@ pub trait ChainKeyToken {
 
 #[ext_contract(ext_chain_key_token_approval)]
 pub trait ChainKeyTokenApproval {
-    fn ckt_approve(
+    fn ckt_approve(&mut self, token_id: String, account_id: AccountId) -> u32;
+    fn ckt_approve_call(
         &mut self,
         token_id: String,
         account_id: AccountId,
         msg: Option<String>,
     ) -> PromiseOrValue<Option<u32>>;
-    fn ckt_revoke(
+    fn ckt_revoke(&mut self, token_id: String, account_id: AccountId);
+    fn ckt_revoke_call(
         &mut self,
         token_id: String,
         account_id: AccountId,
@@ -43,7 +45,7 @@ pub trait ChainKeyTokenApprovalReceiver {
         token_id: String,
         approval_id: u32,
         msg: String,
-    ) -> PromiseOrValue<()>;
+    ) -> PromiseOrValue<bool>;
     fn ckt_on_revoked(
         &mut self,
         approver_id: AccountId,

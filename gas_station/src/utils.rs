@@ -1,6 +1,9 @@
 use ethers_core::{
     types::{transaction::eip2718::TypedTransaction, Eip1559TransactionRequest},
-    utils::{hex, rlp::{Decodable, Rlp}},
+    utils::{
+        hex,
+        rlp::{Decodable, Rlp},
+    },
 };
 use lib::Rejectable;
 

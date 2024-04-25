@@ -158,7 +158,7 @@ impl ChainKeyTokenApprovalReceiver for Contract {
         token_id: String,
         approval_id: u32,
         msg: String,
-    ) -> PromiseOrValue<()> {
+    ) -> PromiseOrValue<bool> {
         self.require_unpaused_or_administrator(&approver_id);
 
         let predecessor = env::predecessor_account_id();

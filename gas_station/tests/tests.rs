@@ -172,7 +172,7 @@ async fn setup() -> Setup {
 
     println!("Approving paymaster NFT key to gas station...");
     alice
-        .call(nft_key.id(), "ckt_approve")
+        .call(nft_key.id(), "ckt_approve_call")
         .args_json(json!({
             "account_id": gas_station.id(),
             "token_id": paymaster_key,
@@ -215,11 +215,10 @@ async fn setup() -> Setup {
 
     println!("Approving Alice's NFT key to be used by gas station...");
     alice
-        .call(nft_key.id(), "ckt_approve")
+        .call(nft_key.id(), "ckt_approve_call")
         .args_json(json!({
             "account_id": gas_station.id(),
             "token_id": alice_key,
-            "msg": "",
         }))
         // TODO: Should this function requrie a 1-yocto deposit?
         // .deposit(NearToken::from_yoctonear(1))
@@ -653,11 +652,10 @@ async fn test_nft_keys_approvals_revoked() {
 
     println!("Revoking Alice's NFT key from being used by gas station...");
     alice
-        .call(nft_key.id(), "ckt_revoke")
+        .call(nft_key.id(), "ckt_revoke_call")
         .args_json(json!({
             "account_id": gas_station.id(),
             "token_id": alice_key,
-            "msg": "",
         }))
         // TODO: Should this function requrie a 1-yocto deposit?
         // .deposit(NearToken::from_yoctonear(1))

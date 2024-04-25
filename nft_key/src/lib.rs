@@ -236,9 +236,9 @@ impl NftKeyContract {
         #[serializer(borsh)] token_id: u32,
         #[serializer(borsh)] account_id: AccountId,
         #[serializer(borsh)] approval_id: u32,
-        #[callback_result] result: Result<(), PromiseError>,
+        #[callback_result] result: Result<bool, PromiseError>,
     ) -> Option<u32> {
-        if result.is_ok() {
+        if result == Ok(false) {
             Some(approval_id)
         } else {
             let mut key_data = self.key_data.get(&token_id).unwrap_or_reject();
@@ -248,84 +248,107 @@ impl NftKeyContract {
             None
         }
     }
-}
 
-#[near_bindgen]
-impl ChainKeyTokenApproval for NftKeyContract {
-    fn ckt_approve(
-        &mut self,
-        token_id: TokenId,
-        account_id: AccountId,
-        msg: Option<String>,
-    ) -> PromiseOrValue<Option<u32>> {
-        let id = token_id.parse().expect_or_reject("Invalid token ID");
-        let actual_owner = Nep171Controller::token_owner(self, &token_id);
-        let predecessor = env::predecessor_account_id();
-        require!(
-            actual_owner.as_ref() == Some(&predecessor),
-            format!("Unauthorized {actual_owner:?} != {predecessor}")
-        );
+    #[private]
+    pub fn ck_revoke_callback(&self) {}
 
+    fn require_is_token_owner(&self, predecessor: &AccountId, token_id: &TokenId) {
+        let actual_owner = Nep171Controller::token_owner(self, token_id);
+        require!(actual_owner.as_ref() == Some(predecessor), "Unauthorized");
+    }
+
+    fn approve(&mut self, token_id: u32, account_id: &AccountId) -> u32 {
         let approval_id = self.generate_id();
 
         let mut key_data = self
             .key_data
-            .get(&id)
+            .get(&token_id)
             .expect_or_reject("Missing data for key");
-        key_data.approvals.insert(&account_id, &approval_id);
-        self.key_data.insert(&id, &key_data);
+        key_data.approvals.insert(account_id, &approval_id);
+        self.key_data.insert(&token_id, &key_data);
 
-        msg.map_or(PromiseOrValue::Value(Some(approval_id)), |msg| {
-            PromiseOrValue::Promise(
-                ext_chain_key_token_approval_receiver::ext(account_id).ckt_on_approved(
-                    predecessor,
-                    token_id,
-                    approval_id,
-                    msg,
-                ),
-            )
-        })
+        approval_id
     }
 
-    fn ckt_revoke(
+    fn revoke(&mut self, token_id: u32, account_id: &AccountId) -> Option<u32> {
+        self.key_data.get(&token_id).and_then(|mut key_data| {
+            let removed = key_data.approvals.remove(account_id);
+            self.key_data.insert(&token_id, &key_data);
+            removed
+        })
+    }
+}
+
+#[near_bindgen]
+impl ChainKeyTokenApproval for NftKeyContract {
+    fn ckt_approve(&mut self, token_id: TokenId, account_id: AccountId) -> u32 {
+        let predecessor = env::predecessor_account_id();
+        self.require_is_token_owner(&predecessor, &token_id);
+        let id = token_id.parse().expect_or_reject("Invalid token ID");
+        self.approve(id, &account_id)
+    }
+
+    fn ckt_approve_call(
         &mut self,
-        token_id: TokenId,
+        token_id: String,
+        account_id: AccountId,
+        msg: Option<String>,
+    ) -> PromiseOrValue<Option<u32>> {
+        let predecessor = env::predecessor_account_id();
+        self.require_is_token_owner(&predecessor, &token_id);
+        let id = token_id.parse().expect_or_reject("Invalid token ID");
+        let approval_id = self.approve(id, &account_id);
+
+        PromiseOrValue::Promise(
+            ext_chain_key_token_approval_receiver::ext(account_id.clone())
+                .ckt_on_approved(predecessor, token_id, approval_id, msg.unwrap_or_default())
+                .then(Self::ext(env::current_account_id()).ck_approve_callback(
+                    id,
+                    account_id,
+                    approval_id,
+                )),
+        )
+    }
+
+    fn ckt_revoke(&mut self, token_id: TokenId, account_id: AccountId) {
+        let predecessor = env::predecessor_account_id();
+        self.require_is_token_owner(&predecessor, &token_id);
+        let id = token_id.parse().expect_or_reject("Invalid token ID");
+        self.revoke(id, &account_id);
+    }
+
+    fn ckt_revoke_call(
+        &mut self,
+        token_id: String,
         account_id: AccountId,
         msg: Option<String>,
     ) -> PromiseOrValue<()> {
-        let id: u32 = token_id.parse().expect_or_reject("Invalid token ID");
-        let actual_owner = Nep171Controller::token_owner(self, &token_id);
         let predecessor = env::predecessor_account_id();
-        require!(actual_owner.as_ref() == Some(&predecessor), "Unauthorized");
+        self.require_is_token_owner(&predecessor, &token_id);
+        let id = token_id.parse().expect_or_reject("Invalid token ID");
+        let revoked_approval_id = self.revoke(id, &account_id);
 
-        let Some(mut key_data) = self.key_data.get(&id) else {
-            return PromiseOrValue::Value(());
-        };
-
-        let Some(revoked_approval_id) = key_data.approvals.remove(&account_id) else {
-            return PromiseOrValue::Value(());
-        };
-
-        self.key_data.insert(&id, &key_data);
-
-        msg.map_or(PromiseOrValue::Value(()), |msg| {
+        if let Some(revoked_approval_id) = revoked_approval_id {
             PromiseOrValue::Promise(
-                ext_chain_key_token_approval_receiver::ext(account_id).ckt_on_revoked(
-                    predecessor,
-                    token_id,
-                    revoked_approval_id,
-                    msg,
-                ),
+                ext_chain_key_token_approval_receiver::ext(account_id)
+                    .ckt_on_revoked(
+                        predecessor,
+                        token_id,
+                        revoked_approval_id,
+                        msg.unwrap_or_default(),
+                    )
+                    .then(Self::ext(env::current_account_id()).ck_revoke_callback()),
             )
-        })
+        } else {
+            PromiseOrValue::Value(())
+        }
     }
 
     fn ckt_revoke_all(&mut self, token_id: TokenId) -> near_sdk::json_types::U64 {
-        let id: u32 = token_id.parse().expect_or_reject("Invalid token ID");
-        let actual_owner = Nep171Controller::token_owner(self, &token_id);
         let predecessor = env::predecessor_account_id();
-        require!(actual_owner.as_ref() == Some(&predecessor), "Unauthorized");
+        self.require_is_token_owner(&predecessor, &token_id);
 
+        let id: u32 = token_id.parse().expect_or_reject("Invalid token ID");
         let Some(mut key_data) = self.key_data.get(&id) else {
             return 0.into();
         };
