@@ -1,14 +1,21 @@
 use std::cmp::Ordering;
 
 use ethers_core::types::U256;
-use lib::{foreign_address::ForeignAddress, Rejectable};
+use lib::foreign_address::ForeignAddress;
 use near_sdk::{
     borsh::{self, BorshDeserialize, BorshSerialize},
     json_types::U128,
     serde::{Deserialize, Serialize},
 };
 use schemars::JsonSchema;
-use thiserror::Error;
+
+use crate::{
+    error::{
+        ConfidenceIntervalTooLargeError, ExponentTooLargeError, NegativePriceError,
+        PaymasterInsufficientFundsError, PriceDataError,
+    },
+    valid_transaction_request::ValidTransactionRequest,
+};
 
 #[derive(
     Serialize,
@@ -35,11 +42,20 @@ impl PaymasterConfiguration {
         nonce
     }
 
-    pub fn deduct(&mut self, request_tokens_for_gas: U256) {
+    /// Deducts `amount` from the paymaster's minimum available balance.
+    ///
+    /// # Errors
+    ///
+    /// - If `amount` is greater than the paymaster's minimum available balance.
+    pub fn deduct(&mut self, amount: U256) -> Result<(), PaymasterInsufficientFundsError> {
         self.minimum_available_balance = U256(self.minimum_available_balance)
-            .checked_sub(request_tokens_for_gas)
-            .expect_or_reject("Paymaster does not have enough funds")
+            .checked_sub(amount)
+            .ok_or(PaymasterInsufficientFundsError {
+                minimum_available_balance: U256(self.minimum_available_balance),
+                amount,
+            })?
             .0;
+        Ok(())
     }
 }
 
@@ -62,10 +78,6 @@ pub struct ForeignChainConfiguration {
     pub decimals: u8,
 }
 
-#[derive(Debug, Error)]
-#[error("Paymaster with index {0} does not exist")]
-pub struct PaymasterDoesNotExistError(u32);
-
 impl ForeignChainConfiguration {
     pub fn transfer_gas(&self) -> U256 {
         U256(self.transfer_gas)
@@ -84,45 +96,71 @@ impl ForeignChainConfiguration {
         self.paymasters.get(&paymaster_key)
     }
 
+    pub fn calculate_gas_tokens_to_sponsor_transaction(
+        &self,
+        transaction: &ValidTransactionRequest,
+    ) -> U256 {
+        (transaction.gas() + U256(self.transfer_gas)) * transaction.max_fee_per_gas()
+    }
+
     /// Calculate the price that this chain configuration charges to convert
     /// assets. Applies a fee on top of the provided market rates.
-    pub fn token_conversion_price(
+    ///
+    /// # Errors
+    ///
+    /// - If the price data is invalid (negative, confidence interval too large).
+    pub fn price_for_gas_tokens(
         &self,
         quantity_to_convert: U256,
-        from_asset_price_in_usd: &pyth::state::Price,
-        from_asset_decimals: u8,
+        this_asset_price_in_usd: &pyth::state::Price,
         into_asset_price_in_usd: &pyth::state::Price,
         into_asset_decimals: u8,
-    ) -> u128 {
+    ) -> Result<u128, PriceDataError> {
         // Construct conversion rate
         let mut conversion_rate = (
-            u128::try_from(from_asset_price_in_usd.price.0)
-                .expect_or_reject("Negative price")
+            u128::try_from(this_asset_price_in_usd.price.0)
+                .map_err(|_| NegativePriceError)?
                 .checked_sub(
                     // Pessimistic pricing for the asset we're converting from. (Assume it is less valuable.)
-                    u128::from(from_asset_price_in_usd.conf.0),
+                    u128::from(this_asset_price_in_usd.conf.0),
                 )
-                .expect_or_reject("Confidence interval too large"),
+                .ok_or(ConfidenceIntervalTooLargeError)?,
             u128::try_from(into_asset_price_in_usd.price.0)
-                .expect_or_reject("Negative price")
+                .map_err(|_| NegativePriceError)?
                 .checked_add(
                     // Pessimistic pricing for the asset we're converting into. (Assume it is more valuable.)
                     u128::from(into_asset_price_in_usd.conf.0),
                 )
-                .expect_or_reject("Confidence interval too large"),
+                .ok_or(ConfidenceIntervalTooLargeError)?,
         );
 
-        let exp = from_asset_price_in_usd.expo - into_asset_price_in_usd.expo
-            + i32::from(into_asset_decimals)
-            - i32::from(from_asset_decimals);
+        let exp = this_asset_price_in_usd
+            .expo
+            .checked_sub(into_asset_price_in_usd.expo)
+            .and_then(|x| x.checked_add(i32::from(into_asset_decimals)))
+            .and_then(|x| x.checked_sub(i32::from(self.decimals)))
+            .ok_or(ExponentTooLargeError)?;
 
+        // Apply exponent
         match exp.cmp(&0) {
             Ordering::Less => {
-                conversion_rate.1 *= 10u128.pow(exp.unsigned_abs());
+                let factor = 10u128
+                    .checked_pow(exp.unsigned_abs())
+                    .ok_or(ExponentTooLargeError)?;
+                conversion_rate.1 = conversion_rate
+                    .1
+                    .checked_mul(factor)
+                    .ok_or(ExponentTooLargeError)?;
             }
             #[allow(clippy::cast_sign_loss)]
             Ordering::Greater => {
-                conversion_rate.0 *= 10u128.pow(exp as u32);
+                let factor = 10u128
+                    .checked_pow(exp as u32)
+                    .ok_or(ExponentTooLargeError)?;
+                conversion_rate.0 = conversion_rate
+                    .0
+                    .checked_mul(factor)
+                    .ok_or(ExponentTooLargeError)?;
             }
             Ordering::Equal => {}
         }
@@ -132,6 +170,6 @@ impl ForeignChainConfiguration {
         let (b, rem) = a.div_mod(U256::from(conversion_rate.1) * U256::from(self.fee_rate.1));
 
         // Round up. Again, pessimistic pricing.
-        if rem.is_zero() { b } else { b + 1 }.as_u128()
+        Ok(if rem.is_zero() { b } else { b + 1 }.as_u128())
     }
 }

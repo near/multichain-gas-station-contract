@@ -383,13 +383,12 @@ impl Contract {
         )
     }
 
-    pub fn estimate_gas_cost(
+    pub fn estimate_fee(
         &self,
         transaction_rlp_hex: String,
         local_asset_price: pyth::state::Price,
         local_asset_decimals: u8,
         foreign_asset_price: pyth::state::Price,
-        foreign_asset_decimals: u8,
     ) -> U128 {
         let transaction =
             ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
@@ -397,18 +396,18 @@ impl Contract {
 
         let foreign_chain_configuration = self.get_chain(transaction.chain_id).unwrap_or_reject();
 
-        let paymaster_transaction_gas = foreign_chain_configuration.transfer_gas();
-        let request_tokens_for_gas =
-            (transaction.gas() + paymaster_transaction_gas) * transaction.max_fee_per_gas();
+        let gas_tokens_to_sponsor_transaction =
+            foreign_chain_configuration.calculate_gas_tokens_to_sponsor_transaction(&transaction);
 
-        foreign_chain_configuration
-            .token_conversion_price(
-                request_tokens_for_gas,
+        let purchase_price_for_gas_tokens = foreign_chain_configuration
+            .price_for_gas_tokens(
+                gas_tokens_to_sponsor_transaction,
                 &foreign_asset_price,
-                foreign_asset_decimals,
                 &local_asset_price,
                 local_asset_decimals,
             )
-            .into()
+            .unwrap_or_reject();
+
+        purchase_price_for_gas_tokens.into()
     }
 }

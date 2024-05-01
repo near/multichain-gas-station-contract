@@ -297,7 +297,7 @@ async fn fail_price_estimation_minus_one_is_insufficient() {
     );
 
     let price_estimation = gas_station
-        .view("estimate_gas_cost")
+        .view("estimate_fee")
         .args_json(json!({
             "transaction_rlp_hex": hex::encode_prefixed(&eth_transaction.rlp()),
             "local_asset_price": local_asset_price,
@@ -365,7 +365,7 @@ async fn test_price_estimation() {
     );
 
     let price_estimation = gas_station
-        .view("estimate_gas_cost")
+        .view("estimate_fee")
         .args_json(json!({
             "transaction_rlp_hex": hex::encode_prefixed(&eth_transaction.rlp()),
             "local_asset_price": local_asset_price,
