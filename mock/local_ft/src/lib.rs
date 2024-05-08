@@ -1,18 +1,13 @@
 use lib::Rejectable;
-use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
-    env,
-    json_types::U128,
-    near_bindgen, PanicOnDefault,
-};
+use near_sdk::{env, json_types::U128, near, PanicOnDefault};
 #[allow(clippy::wildcard_imports)]
 use near_sdk_contract_tools::ft::*;
 
-#[derive(BorshSerialize, BorshDeserialize, Debug, PanicOnDefault, Nep141)]
-#[near_bindgen]
+#[derive(Debug, PanicOnDefault, Nep141)]
+#[near(contract_state)]
 pub struct LocalFtContract {}
 
-#[near_bindgen]
+#[near]
 impl LocalFtContract {
     #[init]
     pub fn new() -> Self {
@@ -22,11 +17,7 @@ impl LocalFtContract {
     pub fn mint(&mut self, amount: U128) {
         Nep141Controller::mint(
             self,
-            &Nep141Mint {
-                amount: amount.0,
-                receiver_id: &env::predecessor_account_id(),
-                memo: None,
-            },
+            &Nep141Mint::new(amount.0, env::predecessor_account_id()),
         )
         .expect_or_reject("Failed to fungible tokens");
     }

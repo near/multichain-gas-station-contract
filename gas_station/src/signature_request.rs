@@ -1,25 +1,10 @@
 use ethers_core::types::U256;
-use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
-    serde::{Deserialize, Serialize},
-};
-use schemars::JsonSchema;
+use near_sdk::near;
 
 use crate::{valid_transaction_request::ValidTransactionRequest, ChainKeyAuthorization};
 
-#[derive(
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-    JsonSchema,
-    Default,
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub struct SignatureBorsh {
     r: [u8; 32],
     s: [u8; 32],
@@ -50,36 +35,16 @@ impl From<SignatureBorsh> for ethers_core::types::Signature {
     }
 }
 
-#[derive(
-    BorshDeserialize,
-    BorshSerialize,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub enum Status {
     Pending,
     InFlight,
     Signed { signature: SignatureBorsh },
 }
 
-#[derive(
-    BorshDeserialize,
-    BorshSerialize,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub struct SignatureRequest {
     pub status: Status,
     pub token_id: String,

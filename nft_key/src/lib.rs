@@ -4,31 +4,30 @@ use lib::{
     Rejectable,
 };
 use near_sdk::{
-    assert_one_yocto,
-    borsh::{self, BorshDeserialize, BorshSerialize},
-    collections::UnorderedMap,
-    env, near_bindgen, require, AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError,
-    PromiseOrValue,
+    assert_one_yocto, collections::UnorderedMap, env, near, require, AccountId, BorshStorageKey,
+    NearToken, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
 use near_sdk_contract_tools::hook::Hook;
 #[allow(clippy::wildcard_imports)]
 use near_sdk_contract_tools::nft::*;
 
-#[derive(Debug, BorshSerialize, BorshStorageKey)]
+#[derive(Debug, BorshStorageKey)]
+#[near]
 enum StorageKey {
     KeyData,
     ApprovalsFor(u32),
 }
 
-#[derive(Debug, BorshSerialize, BorshDeserialize)]
+#[derive(Debug)]
+#[near]
 pub struct KeyData {
     pub approvals: UnorderedMap<AccountId, u32>,
     pub key_version: u32,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Debug, PanicOnDefault, NonFungibleToken)]
+#[derive(Debug, PanicOnDefault, NonFungibleToken)]
 #[non_fungible_token(transfer_hook = "Self", burn_hook = "Self")]
-#[near_bindgen]
+#[near(contract_state)]
 pub struct NftKeyContract {
     pub next_id: u32,
     pub signer_contract_id: AccountId,
@@ -39,7 +38,7 @@ fn generate_token_metadata(id: u32) -> TokenMetadata {
     TokenMetadata::new().title(format!("Chain Key Token #{id}"))
 }
 
-#[near_bindgen]
+#[near]
 impl NftKeyContract {
     #[init]
     pub fn new(signer_contract_id: AccountId) -> Self {
@@ -49,7 +48,7 @@ impl NftKeyContract {
             key_data: UnorderedMap::new(StorageKey::KeyData),
         };
 
-        contract.set_contract_metadata(ContractMetadata::new(
+        contract.set_contract_metadata(&ContractMetadata::new(
             "Chain Key Token".to_string(),
             "CKT".to_string(),
             None,
@@ -97,12 +96,8 @@ impl NftKeyContract {
                 approvals: UnorderedMap::new(StorageKey::ApprovalsFor(id)),
             },
         );
-        self.mint_with_metadata(
-            id.to_string(),
-            predecessor.clone(),
-            generate_token_metadata(id),
-        )
-        .unwrap_or_reject();
+        self.mint_with_metadata(&id.to_string(), &predecessor, &generate_token_metadata(id))
+            .unwrap_or_reject();
 
         self.storage_accounting(&predecessor, storage_usage_start)
             .unwrap_or_reject();
@@ -111,7 +106,7 @@ impl NftKeyContract {
     }
 }
 
-#[near_bindgen]
+#[near]
 impl ChainKeyToken for NftKeyContract {
     #[payable]
     fn ckt_sign_hash(
@@ -154,7 +149,7 @@ impl ChainKeyToken for NftKeyContract {
                 )
                 .then(
                     Self::ext(env::current_account_id())
-                        .with_static_gas(near_sdk::Gas::ONE_TERA * 3)
+                        .with_static_gas(near_sdk::Gas::from_tgas(3))
                         .with_unused_gas_weight(1)
                         .sign_callback(),
                 ),
@@ -190,8 +185,8 @@ impl ChainKeyToken for NftKeyContract {
                         "path": format!("{id},{path}"),
                     }))
                     .unwrap_or_reject(),
-                    0,
-                    env::prepaid_gas() / 10,
+                    NearToken::from_yoctonear(0),
+                    env::prepaid_gas().saturating_div(10),
                 ),
             )
         }
@@ -202,7 +197,7 @@ impl ChainKeyToken for NftKeyContract {
     }
 }
 
-#[near_bindgen]
+#[near]
 impl NftKeyContract {
     #[cfg(feature = "real-kdf")]
     #[private]
@@ -283,7 +278,7 @@ impl NftKeyContract {
     }
 }
 
-#[near_bindgen]
+#[near]
 impl ChainKeyTokenApproval for NftKeyContract {
     #[payable]
     fn ckt_approve(&mut self, token_id: TokenId, account_id: AccountId) -> u32 {
@@ -397,10 +392,10 @@ impl Hook<NftKeyContract, Nep171Transfer<'_>> for NftKeyContract {
 impl Hook<NftKeyContract, Nep171Burn<'_>> for NftKeyContract {
     fn hook<R>(
         contract: &mut NftKeyContract,
-        burn: &Nep171Burn<'_>,
+        burn: &Nep171Burn,
         f: impl FnOnce(&mut NftKeyContract) -> R,
     ) -> R {
-        for token_id in burn.token_ids {
+        for token_id in &burn.token_ids {
             contract.ckt_revoke_all(token_id.clone());
         }
         f(contract)

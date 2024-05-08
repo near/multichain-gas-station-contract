@@ -4,13 +4,8 @@ members = ["gas_station", "lib", "mock/*", "nft_key"]
 
 [workspace.dependencies]
 ethers-core = "2.0.13"
-near-sdk = { version = "4.1.1", default-features = false, features = [
-    "wee_alloc",
-    "legacy",
-    "abi",
-] }
-near-sdk-contract-tools = "2.1"
-pyth-near = { git = "https://github.com/pyth-network/pyth-crosschain.git", rev = "d1c5d93c8e48a3b5c4df184b0573d2d712790854" }
+near-sdk = "5.1"
+near-sdk-contract-tools = { version = "3.0.0", path = "../near-sdk-contract-tools" }
 schemars = "0.8.16"
 thiserror = "1"
 
@@ -29,6 +24,3 @@ opt-level = "z"
 overflow-checks = true
 panic = "abort"
 strip = true
-
-[patch.crates-io]
-parity-secp256k1 = { git = "https://github.com/paritytech/rust-secp256k1", rev = "d05fd8e152f8d110b587906e3d854196b086e42a" }

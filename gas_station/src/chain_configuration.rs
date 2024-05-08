@@ -1,13 +1,8 @@
 use std::cmp::Ordering;
 
 use ethers_core::types::U256;
-use lib::foreign_address::ForeignAddress;
-use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
-    json_types::U128,
-    serde::{Deserialize, Serialize},
-};
-use schemars::JsonSchema;
+use lib::{foreign_address::ForeignAddress, pyth};
+use near_sdk::{json_types::U128, near};
 
 use crate::{
     error::{
@@ -17,18 +12,8 @@ use crate::{
     valid_transaction_request::ValidTransactionRequest,
 };
 
-#[derive(
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-    JsonSchema,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub struct PaymasterConfiguration {
     pub nonce: u32,
     pub token_id: String,
@@ -59,8 +44,8 @@ impl PaymasterConfiguration {
     }
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[near(serializers = [json])]
 pub struct ViewPaymasterConfiguration {
     pub nonce: u32,
     pub token_id: String,
@@ -68,7 +53,8 @@ pub struct ViewPaymasterConfiguration {
     pub minimum_available_balance: U128,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Debug)]
+#[derive(Debug)]
+#[near]
 pub struct ForeignChainConfiguration {
     pub paymasters: near_sdk::collections::TreeMap<String, PaymasterConfiguration>,
     pub next_paymaster: String,
@@ -112,8 +98,8 @@ impl ForeignChainConfiguration {
     pub fn price_for_gas_tokens(
         &self,
         quantity_to_convert: U256,
-        this_asset_price_in_usd: &pyth::state::Price,
-        into_asset_price_in_usd: &pyth::state::Price,
+        this_asset_price_in_usd: &pyth::Price,
+        into_asset_price_in_usd: &pyth::Price,
         into_asset_decimals: u8,
     ) -> Result<u128, PriceDataError> {
         // Construct conversion rate

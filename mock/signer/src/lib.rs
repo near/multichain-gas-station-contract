@@ -3,8 +3,7 @@ use lib::{
     signer::{MpcSignature, SignerInterface},
 };
 use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
-    env, near_bindgen, require, AccountId, PromiseOrValue, PublicKey,
+    env, near, require, AccountId, PromiseOrValue, PublicKey,
 };
 
 #[must_use]
@@ -16,11 +15,11 @@ pub fn construct_spoof_key(
     ethers_core::k256::ecdsa::SigningKey::from_bytes(predecessor_hash.as_slice().into()).unwrap()
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Default, Debug)]
-#[near_bindgen]
+#[derive(Default, Debug)]
+#[near(contract_state)]
 pub struct MockSignerContract {}
 
-#[near_bindgen]
+#[near]
 impl MockSignerContract {
     #[must_use]
     pub fn public_key_for(&self, account_id: AccountId, path: String) -> String {
@@ -31,7 +30,7 @@ impl MockSignerContract {
     }
 }
 
-#[near_bindgen]
+#[near]
 impl SignerInterface for MockSignerContract {
     fn sign(
         &mut self,

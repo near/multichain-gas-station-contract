@@ -1,9 +1,4 @@
-use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
-    json_types::U64,
-    serde::{Deserialize, Serialize},
-    AccountId,
-};
+use near_sdk::{json_types::U64, near, AccountId};
 use near_sdk_contract_tools::event;
 
 use crate::PendingTransactionSequence;
@@ -20,16 +15,16 @@ pub enum ContractEvent {
     TransactionSequenceSigned(TransactionSequenceSigned),
 }
 
-#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub struct TransactionSequenceCreated {
     pub id: U64,
     pub foreign_chain_id: String,
     pub pending_transaction_sequence: PendingTransactionSequence,
 }
 
-#[derive(Serialize, Deserialize, BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub struct TransactionSequenceSigned {
     pub id: U64,
     pub foreign_chain_id: String,

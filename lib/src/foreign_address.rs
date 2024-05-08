@@ -4,12 +4,11 @@ use ethers_core::{
     types::{NameOrAddress, H160},
     utils::to_checksum,
 };
-use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
+use near_sdk::near;
 use schemars::JsonSchema;
 
-#[derive(
-    BorshSerialize, BorshDeserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Clone, Debug,
-)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Copy, Clone, Debug)]
+#[near]
 pub struct ForeignAddress(pub [u8; 20]);
 
 impl ForeignAddress {

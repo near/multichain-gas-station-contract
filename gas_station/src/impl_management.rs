@@ -18,14 +18,14 @@ use crate::{
     PendingTransactionSequence, Role, StorageKey,
 };
 use lib::{
-    asset::AssetId, foreign_address::ForeignAddress, oracle::decode_pyth_price_id, Rejectable,
+    asset::AssetId, foreign_address::ForeignAddress, oracle::decode_pyth_price_id, pyth, Rejectable,
 };
 
 #[near_bindgen]
 impl Contract {
     pub fn add_administrator(&mut self, account_id: AccountId) {
         <Self as Rbac>::require_role(&Role::Administrator);
-        self.add_role(account_id, &Role::Administrator);
+        self.add_role(&account_id, &Role::Administrator);
     }
 
     pub fn remove_administrator(&mut self, account_id: AccountId) {
@@ -386,9 +386,9 @@ impl Contract {
     pub fn estimate_fee(
         &self,
         transaction_rlp_hex: String,
-        local_asset_price: pyth::state::Price,
+        local_asset_price: pyth::Price,
         local_asset_decimals: u8,
-        foreign_asset_price: pyth::state::Price,
+        foreign_asset_price: pyth::Price,
     ) -> U128 {
         let transaction =
             ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))

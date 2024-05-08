@@ -16,6 +16,7 @@ use lib::{
     foreign_address::ForeignAddress,
     kdf::get_mpc_address,
     oracle::{decode_pyth_price_id, PYTH_PRICE_ID_ETH_USD, PYTH_PRICE_ID_NEAR_USD},
+    pyth,
     signer::MpcSignature,
 };
 use near_sdk::{json_types::U128, serde::Deserialize, serde_json::json};
@@ -276,22 +277,22 @@ async fn fail_price_estimation_minus_one_is_insufficient() {
             oracle
                 .view("get_price")
                 .args_json(json!({
-                    "price_identifier": pyth::state::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
+                    "price_identifier": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
                 }))
                 .await
                 .unwrap()
-                .json::<pyth::state::Price>()
+                .json::<pyth::Price>()
                 .unwrap()
         },
         async {
             oracle
                 .view("get_price")
                 .args_json(json!({
-                    "price_identifier": pyth::state::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
+                    "price_identifier": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
                 }))
                 .await
                 .unwrap()
-                .json::<pyth::state::Price>()
+                .json::<pyth::Price>()
                 .unwrap()
         },
     );
@@ -344,22 +345,22 @@ async fn test_price_estimation() {
             oracle
                 .view("get_price")
                 .args_json(json!({
-                    "price_identifier": pyth::state::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
+                    "price_identifier": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
                 }))
                 .await
                 .unwrap()
-                .json::<pyth::state::Price>()
+                .json::<pyth::Price>()
                 .unwrap()
         },
         async {
             oracle
                 .view("get_price")
                 .args_json(json!({
-                    "price_identifier": pyth::state::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
+                    "price_identifier": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
                 }))
                 .await
                 .unwrap()
-                .json::<pyth::state::Price>()
+                .json::<pyth::Price>()
                 .unwrap()
         },
     );

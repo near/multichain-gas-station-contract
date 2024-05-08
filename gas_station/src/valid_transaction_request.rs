@@ -6,25 +6,11 @@ use ethers_core::{
     utils::rlp::{Decodable, Encodable, Rlp},
 };
 use lib::foreign_address::ForeignAddress;
-use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
-    serde::{Deserialize, Serialize},
-};
-use schemars::JsonSchema;
+use near_sdk::near;
 use thiserror::Error;
 
-#[derive(
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    JsonSchema,
-)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub struct ValidTransactionRequest {
     pub to: ForeignAddress,
     pub gas: [u64; 4],

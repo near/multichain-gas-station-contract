@@ -7,6 +7,7 @@ pub mod chain_key;
 pub mod foreign_address;
 pub mod kdf;
 pub mod oracle;
+pub mod pyth;
 pub mod signer;
 
 pub trait Rejectable<T> {

@@ -2,22 +2,20 @@ use near_sdk::{
     collections::{UnorderedMap, UnorderedSet, Vector},
     env,
     json_types::{Base64VecU8, U64},
-    near_bindgen,
-    serde::{Deserialize, Serialize},
-    AccountId,
+    near, AccountId,
 };
 use near_sdk_contract_tools::rbac::Rbac;
 
 use crate::{Contract, ContractExt, Flags, Role, StorageKey, DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS};
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Clone, Debug)]
+#[near(serializers = [json])]
 pub struct StorageEntry {
     pub key: Base64VecU8,
     pub value: Base64VecU8,
 }
 
-#[near_bindgen]
+#[near]
 impl Contract {
     pub fn clear_storage(&mut self, entries: Vec<StorageEntry>) {
         for entry in entries {
@@ -53,7 +51,7 @@ impl Contract {
 
         Rbac::add_role(
             &mut contract,
-            env::predecessor_account_id(),
+            &env::predecessor_account_id(),
             &Role::Administrator,
         );
 
