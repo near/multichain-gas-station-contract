@@ -1,9 +1,3 @@
-use error::{
-    ChainConfigurationDoesNotExistError, CreateFundingTransactionError,
-    InsufficientDepositForFeeError, NoPaymasterConfigurationForChainError, OracleQueryFailureError,
-    SenderUnauthorizedForNftChainKeyError, SignatureRequestDoesNoteExistError,
-    TransactionSequenceDoesNotExistError, TryCreateTransactionCallbackError,
-};
 use ethers_core::{
     types::{transaction::eip2718::TypedTransaction, U256},
     utils::hex,
@@ -33,6 +27,8 @@ pub mod contract_event;
 use contract_event::{ContractEvent, TransactionSequenceCreated, TransactionSequenceSigned};
 
 mod error;
+#[allow(clippy::wildcard_imports)]
+use error::*;
 
 mod impl_chain_key_nft;
 pub use impl_chain_key_nft::ChainKeyReceiverMsg;
@@ -385,14 +381,12 @@ impl Contract {
             },
         )?;
 
-        let paymaster_signature_request = self
-            .create_funding_signature_request(
-                &mut foreign_chain,
-                &transaction_request,
-                sender_foreign_address,
-                gas_tokens_to_sponsor_transaction,
-            )
-            .unwrap_or_reject();
+        let paymaster_signature_request = self.create_funding_signature_request(
+            &mut foreign_chain,
+            &transaction_request,
+            sender_foreign_address,
+            gas_tokens_to_sponsor_transaction,
+        )?;
 
         self.foreign_chains
             .insert(&transaction_request.chain_id, &foreign_chain);
@@ -736,51 +730,41 @@ impl Contract {
     /// - If the price data provided is invalid.
     /// - If the paymaster does not have enough available balance.
     pub fn create_funding_signature_request(
-        &mut self,
+        &self,
         foreign_chain: &mut ForeignChainConfiguration,
         transaction: &ValidTransactionRequest,
         sender_foreign_address: ForeignAddress,
         gas_tokens_to_sponsor_transaction: U256,
-    ) -> Result<SignatureRequest, CreateFundingTransactionError> {
-        let mut paymaster =
-            foreign_chain
-                .next_paymaster()
-                .ok_or(NoPaymasterConfigurationForChainError {
+    ) -> Result<SignatureRequest, RequestNonceError> {
+        foreign_chain.with_request_nonce(
+            gas_tokens_to_sponsor_transaction,
+            |foreign_chain, paymaster| {
+                let paymaster_transaction = ValidTransactionRequest {
                     chain_id: transaction.chain_id,
-                })?;
+                    to: sender_foreign_address,
+                    value: gas_tokens_to_sponsor_transaction.0,
+                    gas: foreign_chain.transfer_gas,
+                    data: vec![],
+                    nonce: U256::from(paymaster.nonce).0,
+                    access_list_rlp: vec![0xc0 /* rlp encoding for empty list */],
+                    max_priority_fee_per_gas: transaction.max_priority_fee_per_gas,
+                    max_fee_per_gas: transaction.max_fee_per_gas,
+                };
 
-        let paymaster_transaction = ValidTransactionRequest {
-            chain_id: transaction.chain_id,
-            to: sender_foreign_address,
-            value: gas_tokens_to_sponsor_transaction.0,
-            gas: foreign_chain.transfer_gas,
-            data: vec![],
-            nonce: U256::from(paymaster.next_nonce()).0,
-            access_list_rlp: vec![0xc0 /* rlp encoding for empty list */],
-            max_priority_fee_per_gas: transaction.max_priority_fee_per_gas,
-            max_fee_per_gas: transaction.max_fee_per_gas,
-        };
+                let paymaster_authorization = self
+                    .paymaster_keys
+                    .get(&paymaster.token_id)
+                    .unwrap_or_reject() // inconsistent state if this fails
+                    .authorization;
 
-        paymaster.deduct(gas_tokens_to_sponsor_transaction)?;
-
-        foreign_chain
-            .paymasters
-            .insert(&paymaster.token_id, &paymaster);
-
-        let paymaster_authorization = self
-            .paymaster_keys
-            .get(&paymaster.token_id)
-            .unwrap_or_reject()
-            .authorization;
-
-        let signature_request = SignatureRequest::new(
-            &paymaster.token_id,
-            paymaster_authorization,
-            paymaster_transaction,
-            true,
-        );
-
-        Ok(signature_request)
+                SignatureRequest::new(
+                    &paymaster.token_id,
+                    paymaster_authorization,
+                    paymaster_transaction,
+                    true,
+                )
+            },
+        )
     }
 
     fn insert_transaction_sequence(

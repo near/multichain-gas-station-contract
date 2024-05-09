@@ -21,9 +21,12 @@
 /// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 /// See the License for the specific language governing permissions and
 /// limitations under the License.
-
 use ethers_core::utils::hex;
-use near_sdk::{ext_contract, json_types::{I64, U64}, near};
+use near_sdk::{
+    ext_contract,
+    json_types::{I64, U64},
+    near,
+};
 
 #[near]
 #[repr(transparent)]
@@ -85,14 +88,14 @@ impl near_sdk::serde::Serialize for PriceIdentifier {
 //
 /// Please refer to the documentation at https://docs.pyth.network/documentation/pythnet-price-feeds/best-practices for how
 /// to how this price safely.
-#[derive(Debug,PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 #[near(serializers = [borsh, json])]
 pub struct Price {
-    pub price:        I64,
+    pub price: I64,
     /// Confidence interval around the price
-    pub conf:         U64,
+    pub conf: U64,
     /// The exponent
-    pub expo:         i32,
+    pub expo: i32,
     /// Unix timestamp of when this price was computed
     pub publish_time: i64,
 }

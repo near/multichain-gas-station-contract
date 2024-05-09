@@ -4,9 +4,8 @@ use lib::{
     Rejectable,
 };
 use near_sdk::{
-    collections::UnorderedMap,
-    env, near, near_bindgen, require,
-    AccountId, Promise, PromiseError, PromiseOrValue,
+    collections::UnorderedMap, env, near, near_bindgen, require, AccountId, Promise, PromiseError,
+    PromiseOrValue,
 };
 use near_sdk_contract_tools::{
     nft::{ext_nep171, Nep171Receiver, TokenId},

@@ -64,7 +64,7 @@ pub enum PriceDataError {
 }
 
 #[derive(Debug, Error, Clone)]
-pub enum CreateFundingTransactionError {
+pub enum RequestNonceError {
     #[error(transparent)]
     NoPaymasterConfigurationForChain(#[from] NoPaymasterConfigurationForChainError),
     #[error(transparent)]
@@ -94,4 +94,6 @@ pub enum TryCreateTransactionCallbackError {
     PriceData(#[from] PriceDataError),
     #[error(transparent)]
     InsufficientDepositForFee(#[from] InsufficientDepositForFeeError),
+    #[error(transparent)]
+    RequestNonce(#[from] RequestNonceError),
 }

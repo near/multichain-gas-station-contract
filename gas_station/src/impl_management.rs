@@ -162,6 +162,7 @@ impl Contract {
         self.foreign_chains.insert(
             &chain_id.0,
             &ForeignChainConfiguration {
+                chain_id: chain_id.0,
                 next_paymaster: String::new(),
                 oracle_asset_id: decode_pyth_price_id(&oracle_asset_id),
                 transfer_gas: U256::from(transfer_gas.0).0,

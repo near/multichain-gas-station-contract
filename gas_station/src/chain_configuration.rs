@@ -7,7 +7,8 @@ use near_sdk::{json_types::U128, near};
 use crate::{
     error::{
         ConfidenceIntervalTooLargeError, ExponentTooLargeError, NegativePriceError,
-        PaymasterInsufficientFundsError, PriceDataError,
+        NoPaymasterConfigurationForChainError, PaymasterInsufficientFundsError, PriceDataError,
+        RequestNonceError,
     },
     valid_transaction_request::ValidTransactionRequest,
 };
@@ -21,26 +22,22 @@ pub struct PaymasterConfiguration {
 }
 
 impl PaymasterConfiguration {
-    pub fn next_nonce(&mut self) -> u32 {
-        let nonce = self.nonce;
-        self.nonce += 1;
-        nonce
-    }
-
-    /// Deducts `amount` from the paymaster's minimum available balance.
+    /// Deducts `amount` from the paymaster's minimum available balance,
+    /// returning the new balance.
     ///
     /// # Errors
     ///
     /// - If `amount` is greater than the paymaster's minimum available balance.
-    pub fn deduct(&mut self, amount: U256) -> Result<(), PaymasterInsufficientFundsError> {
-        self.minimum_available_balance = U256(self.minimum_available_balance)
+    pub fn sub_from_minimum_available_balance(
+        &self,
+        amount: U256,
+    ) -> Result<U256, PaymasterInsufficientFundsError> {
+        U256(self.minimum_available_balance)
             .checked_sub(amount)
             .ok_or(PaymasterInsufficientFundsError {
                 minimum_available_balance: U256(self.minimum_available_balance),
                 amount,
-            })?
-            .0;
-        Ok(())
+            })
     }
 }
 
@@ -56,6 +53,7 @@ pub struct ViewPaymasterConfiguration {
 #[derive(Debug)]
 #[near]
 pub struct ForeignChainConfiguration {
+    pub chain_id: u64,
     pub paymasters: near_sdk::collections::TreeMap<String, PaymasterConfiguration>,
     pub next_paymaster: String,
     pub transfer_gas: [u64; 4],
@@ -69,17 +67,60 @@ impl ForeignChainConfiguration {
         U256(self.transfer_gas)
     }
 
-    pub fn next_paymaster(&mut self) -> Option<PaymasterConfiguration> {
-        let paymaster_key = self
-            .paymasters
+    fn next_paymaster_key(&self) -> Option<String> {
+        self.paymasters
             .ceil_key(&self.next_paymaster)
-            .or_else(|| self.paymasters.min())?;
-        let next_paymaster_key = self
-            .paymasters
-            .higher(&paymaster_key)
-            .or_else(|| self.paymasters.min())?;
-        self.next_paymaster = next_paymaster_key;
-        self.paymasters.get(&paymaster_key)
+            .or_else(|| self.paymasters.min())
+    }
+
+    fn paymaster_key_after(&self, key: &String) -> Option<String> {
+        self.paymasters
+            .higher(key)
+            .or_else(|| self.paymasters.min())
+    }
+
+    /// Facilitates the "purchase" of a transaction nonce from a paymaster,
+    /// ensuring sufficient balance on the foreign chain, proper token key
+    /// rotation, etc.
+    ///
+    /// The predicate will not run if any errors are encountered.
+    ///
+    /// State is only modified after execution of the predicate.
+    ///
+    /// # Errors
+    ///
+    /// - If no paymaster configuration exists.
+    /// - If the paymaster has insufficient balance.
+    pub fn with_request_nonce<R>(
+        &mut self,
+        deduct_amount: U256,
+        f: impl FnOnce(&Self, &PaymasterConfiguration) -> R,
+    ) -> Result<R, RequestNonceError> {
+        let (mut paymaster_config, paymaster_key, paymaster_key_after) = self
+            .next_paymaster()
+            .ok_or(NoPaymasterConfigurationForChainError {
+                chain_id: self.chain_id,
+            })?;
+
+        let new_minimum_balance =
+            paymaster_config.sub_from_minimum_available_balance(deduct_amount)?;
+
+        let r = f(self, &paymaster_config);
+
+        paymaster_config.nonce += 1;
+        paymaster_config.minimum_available_balance = new_minimum_balance.0;
+        self.paymasters.insert(&paymaster_key, &paymaster_config);
+        self.next_paymaster = paymaster_key_after;
+
+        Ok(r)
+    }
+
+    fn next_paymaster(&self) -> Option<(PaymasterConfiguration, String, String)> {
+        let paymaster_key = self.next_paymaster_key()?;
+        let paymaster_key_after = self.paymaster_key_after(&paymaster_key)?;
+        self.paymasters
+            .get(&paymaster_key)
+            .map(|c| (c, paymaster_key, paymaster_key_after))
     }
 
     pub fn calculate_gas_tokens_to_sponsor_transaction(

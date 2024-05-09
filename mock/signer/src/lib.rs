@@ -2,9 +2,7 @@ use lib::{
     kdf::sha256,
     signer::{MpcSignature, SignerInterface},
 };
-use near_sdk::{
-    env, near, require, AccountId, PromiseOrValue, PublicKey,
-};
+use near_sdk::{env, near, require, AccountId, PromiseOrValue, PublicKey};
 
 #[must_use]
 pub fn construct_spoof_key(
