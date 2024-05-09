@@ -1,8 +1,10 @@
 # \[WIP] Multichain Gas Station Contract
 
-> This is still early software. It it not yet audited. It is not yet suitable for building production services upon. Testnet deployments are not guaranteed to be up-to-date with the code in this repository. Testnet deployments and this repository may have breaking changes pushed at any time.
+> [!WARNING]
+> This is still early software. **It is not yet audited.** It is not yet suitable for building production services upon. Testnet deployments are not guaranteed to be up-to-date with the code in this repository. Testnet deployments and this repository may have breaking changes pushed at any time.
 
-**DO NOT USE THIS SOFTWARE TO GENERATE SIGNATURES FOR NON-TESTNET FOREIGN CHAINS.**
+> [!WARNING]
+> **DO NOT USE THIS SOFTWARE TO GENERATE SIGNATURES FOR NON-TESTNET FOREIGN CHAINS.**
 
 This smart contract accepts payments in NEAR tokens in exchange for gas funding on non-NEAR foreign chains. Part of the NEAR Multichain effort, it works in conjunction with the [MPC recovery service](https://github.com/near/mpc-recovery) to generate on-chain signatures.
 
