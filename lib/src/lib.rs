@@ -1,12 +1,11 @@
 use std::fmt::Display;
 
-use near_sdk::env;
-
 pub mod asset;
 pub mod chain_key;
 pub mod foreign_address;
 pub mod kdf;
 pub mod oracle;
+pub mod pyth;
 pub mod signer;
 
 pub trait Rejectable<T> {
@@ -14,23 +13,36 @@ pub trait Rejectable<T> {
     fn expect_or_reject(self, msg: impl Display) -> T;
 }
 
+#[inline]
+fn do_panic(msg: &str) -> ! {
+    #[cfg(target_arch = "wasm32")]
+    {
+        near_sdk::env::panic_str(msg)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        panic!("{msg}")
+    }
+}
+
 impl<T, E: Display> Rejectable<T> for Result<T, E> {
     fn unwrap_or_reject(self) -> T {
-        self.unwrap_or_else(|e| env::panic_str(&e.to_string()))
+        self.unwrap_or_else(|e| do_panic(&e.to_string()))
     }
 
     fn expect_or_reject(self, msg: impl Display) -> T {
-        self.unwrap_or_else(|e| env::panic_str(&format!("{msg}: {e}")))
+        self.unwrap_or_else(|e| do_panic(&format!("{msg}: {e}")))
     }
 }
 
 impl<T> Rejectable<T> for Option<T> {
     fn unwrap_or_reject(self) -> T {
-        self.unwrap_or_else(|| env::panic_str("Attempted to unwrap None"))
+        self.unwrap_or_else(|| do_panic("Attempted to unwrap None"))
     }
 
     fn expect_or_reject(self, msg: impl Display) -> T {
-        self.unwrap_or_else(|| env::panic_str(&msg.to_string()))
+        self.unwrap_or_else(|| do_panic(&msg.to_string()))
     }
 }
 

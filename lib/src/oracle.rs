@@ -9,7 +9,7 @@ pub const PYTH_PRICE_ID_ETH_USD: &str = "EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZP
 pub fn decode_pyth_price_id(s: &str) -> [u8; 32] {
     let mut b = [0u8; 32];
     bs58::decode(s)
-        .into(&mut b)
+        .onto(&mut b)
         .expect_or_reject("Failed to decode Pyth price identifier");
     b
 }

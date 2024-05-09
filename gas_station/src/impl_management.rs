@@ -18,14 +18,14 @@ use crate::{
     PendingTransactionSequence, Role, StorageKey,
 };
 use lib::{
-    asset::AssetId, foreign_address::ForeignAddress, oracle::decode_pyth_price_id, Rejectable,
+    asset::AssetId, foreign_address::ForeignAddress, oracle::decode_pyth_price_id, pyth, Rejectable,
 };
 
 #[near_bindgen]
 impl Contract {
     pub fn add_administrator(&mut self, account_id: AccountId) {
         <Self as Rbac>::require_role(&Role::Administrator);
-        self.add_role(account_id, &Role::Administrator);
+        self.add_role(&account_id, &Role::Administrator);
     }
 
     pub fn remove_administrator(&mut self, account_id: AccountId) {
@@ -162,6 +162,7 @@ impl Contract {
         self.foreign_chains.insert(
             &chain_id.0,
             &ForeignChainConfiguration {
+                chain_id: chain_id.0,
                 next_paymaster: String::new(),
                 oracle_asset_id: decode_pyth_price_id(&oracle_asset_id),
                 transfer_gas: U256::from(transfer_gas.0).0,
@@ -383,13 +384,12 @@ impl Contract {
         )
     }
 
-    pub fn estimate_gas_cost(
+    pub fn estimate_fee(
         &self,
         transaction_rlp_hex: String,
-        local_asset_price: pyth::state::Price,
+        local_asset_price: pyth::Price,
         local_asset_decimals: u8,
-        foreign_asset_price: pyth::state::Price,
-        foreign_asset_decimals: u8,
+        foreign_asset_price: pyth::Price,
     ) -> U128 {
         let transaction =
             ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
@@ -397,18 +397,18 @@ impl Contract {
 
         let foreign_chain_configuration = self.get_chain(transaction.chain_id).unwrap_or_reject();
 
-        let paymaster_transaction_gas = foreign_chain_configuration.transfer_gas();
-        let request_tokens_for_gas =
-            (transaction.gas() + paymaster_transaction_gas) * transaction.max_fee_per_gas();
+        let gas_tokens_to_sponsor_transaction =
+            foreign_chain_configuration.calculate_gas_tokens_to_sponsor_transaction(&transaction);
 
-        foreign_chain_configuration
-            .token_conversion_price(
-                request_tokens_for_gas,
+        let purchase_price_for_gas_tokens = foreign_chain_configuration
+            .price_for_gas_tokens(
+                gas_tokens_to_sponsor_transaction,
                 &foreign_asset_price,
-                foreign_asset_decimals,
                 &local_asset_price,
                 local_asset_decimals,
             )
-            .into()
+            .unwrap_or_reject();
+
+        purchase_price_for_gas_tokens.into()
     }
 }

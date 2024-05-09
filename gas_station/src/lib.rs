@@ -6,28 +6,29 @@ use lib::{
     asset::{AssetBalance, AssetId},
     chain_key::ext_chain_key_token,
     foreign_address::ForeignAddress,
+    pyth::{self, ext_pyth},
     Rejectable,
 };
 use near_sdk::{
-    borsh::{self, BorshDeserialize, BorshSerialize},
     collections::{UnorderedMap, UnorderedSet, Vector},
     env,
     json_types::{U128, U64},
-    near_bindgen, require,
-    serde::{Deserialize, Serialize},
-    AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
+    near, near_bindgen, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault,
+    Promise, PromiseError, PromiseOrValue,
 };
 #[allow(clippy::wildcard_imports)]
 use near_sdk_contract_tools::pause::*;
 use near_sdk_contract_tools::{rbac::Rbac, standard::nep297::Event, Pause, Rbac};
-use pyth::ext::ext_pyth;
-use schemars::JsonSchema;
 
 pub mod chain_configuration;
 use chain_configuration::ForeignChainConfiguration;
 
 pub mod contract_event;
 use contract_event::{ContractEvent, TransactionSequenceCreated, TransactionSequenceSigned};
+
+mod error;
+#[allow(clippy::wildcard_imports)]
+use error::*;
 
 mod impl_chain_key_nft;
 pub use impl_chain_key_nft::ChainKeyReceiverMsg;
@@ -43,48 +44,25 @@ mod utils;
 use utils::{decode_transaction_request, sighash_for_mpc_signing};
 
 pub mod valid_transaction_request;
-use thiserror::Error;
 use valid_transaction_request::ValidTransactionRequest;
 
 const DEFAULT_EXPIRE_SEQUENCE_AFTER_BLOCKS: u64 = 5 * 60; // 5ish minutes at 1s/block
 
-#[derive(
-    BorshSerialize,
-    BorshDeserialize,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub struct Flags {
     pub is_sender_whitelist_enabled: bool,
     pub is_receiver_whitelist_enabled: bool,
 }
 
-#[derive(Serialize, JsonSchema)]
-#[serde(crate = "near_sdk::serde")]
+#[near(serializers = [json])]
 pub struct GetForeignChain {
     pub chain_id: U64,
     pub oracle_asset_id: String,
 }
 
-#[derive(
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    BorshSerialize,
-    BorshDeserialize,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub struct PendingTransactionSequence {
     pub created_by_account_id: AccountId,
     pub signature_requests: Vec<SignatureRequest>,
@@ -100,67 +78,37 @@ impl PendingTransactionSequence {
     }
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near]
 pub struct TransactionSequenceSignedEventAt {
     pub block_height: u64,
     pub event: contract_event::TransactionSequenceSigned,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[near(serializers = [json])]
 pub struct Nep141ReceiverCreateTransactionArgs {
     pub token_id: String,
     pub transaction_rlp_hex: String,
     pub use_paymaster: Option<bool>,
 }
 
-#[derive(
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-    JsonSchema,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub struct TransactionSequenceCreation {
     pub id: U64,
     pub pending_signature_count: u32,
 }
 
-#[derive(
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-    JsonSchema,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub struct ChainKeyData {
     pub public_key_bytes: Vec<u8>,
     pub authorization: ChainKeyAuthorization,
 }
 
-#[derive(
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-    JsonSchema,
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub enum ChainKeyAuthorization {
     Owned,
     Approved(u32),
@@ -188,7 +136,8 @@ impl ChainKeyAuthorization {
     }
 }
 
-#[derive(BorshSerialize, BorshDeserialize, BorshStorageKey, Hash, Clone, Debug, PartialEq, Eq)]
+#[derive(BorshStorageKey, Hash, Clone, Debug, PartialEq, Eq)]
+#[near]
 pub enum StorageKey {
     SenderWhitelist,
     ReceiverWhitelist,
@@ -203,13 +152,14 @@ pub enum StorageKey {
     PaymasterKeys,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize, BorshStorageKey)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BorshStorageKey)]
+#[near]
 pub enum Role {
     Administrator,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[near(serializers = [borsh, json])]
 pub struct LocalAssetConfiguration {
     pub oracle_asset_id: [u8; 32],
     pub decimals: u8,
@@ -217,9 +167,9 @@ pub struct LocalAssetConfiguration {
 
 // TODO: Cooldown timer/lock on nft keys before they can be returned to the user or used again in the gas station contract to avoid race condition
 // TODO: Storage management
-#[derive(BorshSerialize, BorshDeserialize, PanicOnDefault, Debug, Pause, Rbac)]
+#[derive(PanicOnDefault, Debug, Pause, Rbac)]
 #[rbac(roles = "Role")]
-#[near_bindgen]
+#[near(contract_state)]
 pub struct Contract {
     pub next_unique_id: u64,
     pub signer_contract_id: AccountId,
@@ -268,7 +218,7 @@ impl Contract {
 
         Rbac::add_role(
             &mut contract,
-            env::predecessor_account_id(),
+            &env::predecessor_account_id(),
             &Role::Administrator,
         );
 
@@ -289,7 +239,7 @@ impl Contract {
             env::predecessor_account_id(),
             transaction_rlp_hex,
             use_paymaster,
-            AssetBalance::native(env::attached_deposit()),
+            AssetBalance::native(env::attached_deposit().as_yoctonear()),
         )
     }
 
@@ -333,14 +283,12 @@ impl Contract {
             let chain_id = transaction.chain_id();
             let foreign_chain_configuration = self.get_chain(chain_id.as_u64()).unwrap_or_reject();
 
-            ext_pyth::ext(self.oracle_id.clone())
-                .get_price(pyth::state::PriceIdentifier(
-                    accepted_local_asset.oracle_asset_id,
-                ))
+            ext_pyth::ext(self.oracle_id.as_str().parse().unwrap())
+                .get_price(pyth::PriceIdentifier(accepted_local_asset.oracle_asset_id))
                 .and(
-                    ext_pyth::ext(self.oracle_id.clone()).get_price(pyth::state::PriceIdentifier(
-                        foreign_chain_configuration.oracle_asset_id,
-                    )),
+                    ext_pyth::ext(self.oracle_id.as_str().parse().unwrap()).get_price(
+                        pyth::PriceIdentifier(foreign_chain_configuration.oracle_asset_id),
+                    ),
                 )
                 .then(
                     Self::ext(env::current_account_id()).create_transaction_callback(
@@ -366,7 +314,7 @@ impl Contract {
                 escrow: None,
             };
 
-            let creation = self.insert_transaction_sequence(pending_transaction_sequence.clone());
+            let creation = self.insert_transaction_sequence(&pending_transaction_sequence);
 
             ContractEvent::TransactionSequenceCreated(TransactionSequenceCreated {
                 id: creation.id,
@@ -379,108 +327,77 @@ impl Contract {
         }
     }
 
-    #[private]
-    pub fn create_transaction_callback(
+    fn try_create_transaction_callback(
         &mut self,
-        #[serializer(borsh)] sender: AccountId,
-        #[serializer(borsh)] token_id: String,
-        #[serializer(borsh)] deposit: AssetBalance,
-        #[serializer(borsh)] transaction_request: ValidTransactionRequest,
-        #[callback_result] price_data_local_result: Result<pyth::state::Price, PromiseError>,
-        #[callback_result] price_data_foreign_result: Result<pyth::state::Price, PromiseError>,
-    ) -> TransactionSequenceCreation {
-        // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
-        let mut foreign_chain_configuration = self
-            .foreign_chains
-            .get(&transaction_request.chain_id)
-            .expect_or_reject(ChainConfigurationDoesNotExistError {
-                chain_id: transaction_request.chain_id,
-            });
-
-        let price_data_local = price_data_local_result
-            .ok()
-            .expect_or_reject("Failed to fetch local price data");
-        let price_data_foreign = price_data_foreign_result
-            .ok()
-            .expect_or_reject("Failed to fetch foreign price data");
-
-        let paymaster_transaction_gas = foreign_chain_configuration.transfer_gas();
-        let request_tokens_for_gas = (transaction_request.gas() + paymaster_transaction_gas)
-            * transaction_request.max_fee_per_gas(); // Validation ensures gas is set.
+        sender: &AccountId,
+        token_id: String,
+        deposit: &AssetBalance,
+        transaction_request: ValidTransactionRequest,
+        local_asset_price_result: Result<pyth::Price, PromiseError>,
+        foreign_asset_price_result: Result<pyth::Price, PromiseError>,
+    ) -> Result<(u128, TransactionSequenceCreation), TryCreateTransactionCallbackError> {
+        let local_asset_price = local_asset_price_result.map_err(|_| OracleQueryFailureError)?;
+        let foreign_asset_price =
+            foreign_asset_price_result.map_err(|_| OracleQueryFailureError)?;
 
         let accepted_local_asset = self
             .accepted_local_assets
             .get(&deposit.asset_id)
             .unwrap_or_reject();
 
-        let fee = foreign_chain_configuration.token_conversion_price(
-            request_tokens_for_gas,
-            &price_data_foreign,
-            foreign_chain_configuration.decimals,
-            &price_data_local,
-            accepted_local_asset.decimals,
-        );
-        let refund = deposit
-            .amount
-            .0
-            .checked_sub(fee)
-            .expect_or_reject("Attached deposit is less than fee");
-
-        if refund > 0 {
-            // Refund excess
-            deposit.asset_id.transfer(sender.clone(), refund);
-        }
-
-        let mut paymaster = foreign_chain_configuration
-            .next_paymaster()
-            .expect_or_reject("No paymasters found");
-
-        let user_key = self
+        let user_chain_key = self
             .user_chain_keys
-            .get(&sender)
-            .expect_or_reject("No managed keys for sender")
-            .get(&token_id)
-            .expect_or_reject("Sender is unauthorized for the requested key path");
+            .get(sender)
+            .and_then(|user_chain_keys| user_chain_keys.get(&token_id))
+            .ok_or_else(|| SenderUnauthorizedForNftChainKeyError {
+                sender: sender.clone(),
+                token_id: token_id.clone(),
+            })?;
 
         let sender_foreign_address =
-            ForeignAddress::from_raw_public_key(&user_key.public_key_bytes);
+            ForeignAddress::from_raw_public_key(&user_chain_key.public_key_bytes);
 
-        let paymaster_transaction = ValidTransactionRequest {
-            chain_id: transaction_request.chain_id,
-            to: sender_foreign_address,
-            value: request_tokens_for_gas.0,
-            gas: paymaster_transaction_gas.0,
-            data: vec![],
-            nonce: U256::from(paymaster.next_nonce()).0,
-            access_list_rlp: vec![0xc0 /* rlp encoding for empty list */],
-            max_priority_fee_per_gas: transaction_request.max_priority_fee_per_gas,
-            max_fee_per_gas: transaction_request.max_fee_per_gas,
-        };
+        let mut foreign_chain = self
+            .foreign_chains
+            .get(&transaction_request.chain_id)
+            .ok_or(ChainConfigurationDoesNotExistError {
+                chain_id: transaction_request.chain_id,
+            })?;
 
-        paymaster.deduct(request_tokens_for_gas);
+        let gas_tokens_to_sponsor_transaction =
+            foreign_chain.calculate_gas_tokens_to_sponsor_transaction(&transaction_request);
 
-        foreign_chain_configuration
-            .paymasters
-            .insert(&paymaster.token_id, &paymaster);
+        let local_asset_fee = foreign_chain.price_for_gas_tokens(
+            gas_tokens_to_sponsor_transaction,
+            &foreign_asset_price,
+            &local_asset_price,
+            accepted_local_asset.decimals,
+        )?;
+
+        let refund = deposit.amount.0.checked_sub(local_asset_fee).ok_or(
+            InsufficientDepositForFeeError {
+                deposit: deposit.amount.0,
+                fee: local_asset_fee,
+            },
+        )?;
+
+        let paymaster_signature_request = self.create_funding_signature_request(
+            &mut foreign_chain,
+            &transaction_request,
+            sender_foreign_address,
+            gas_tokens_to_sponsor_transaction,
+        )?;
+
         self.foreign_chains
-            .insert(&transaction_request.chain_id, &foreign_chain_configuration);
+            .insert(&transaction_request.chain_id, &foreign_chain);
 
-        let paymaster_authorization = self
-            .paymaster_keys
-            .get(&paymaster.token_id)
-            .unwrap_or_reject() // inconsistent state if this fails
-            .authorization;
+        // After this point, the function should be virtually infallible, excluding out-of-gas errors.
 
         let signature_requests = vec![
-            SignatureRequest::new(
-                &paymaster.token_id,
-                paymaster_authorization,
-                paymaster_transaction,
-                true,
-            ),
+            paymaster_signature_request,
             SignatureRequest::new(
                 &token_id,
-                user_key.authorization,
+                user_chain_key.authorization,
                 transaction_request.clone(),
                 false,
             ),
@@ -488,15 +405,15 @@ impl Contract {
 
         let pending_transaction_sequence = PendingTransactionSequence {
             signature_requests,
-            created_by_account_id: sender,
+            created_by_account_id: sender.clone(),
             created_at_block_height: env::block_height().into(),
             escrow: Some(AssetBalance {
-                amount: fee.into(),
-                asset_id: deposit.asset_id,
+                amount: local_asset_fee.into(),
+                asset_id: deposit.asset_id.clone(),
             }),
         };
 
-        let creation = self.insert_transaction_sequence(pending_transaction_sequence.clone());
+        let creation = self.insert_transaction_sequence(&pending_transaction_sequence);
 
         ContractEvent::TransactionSequenceCreated(TransactionSequenceCreated {
             id: creation.id,
@@ -505,7 +422,51 @@ impl Contract {
         })
         .emit();
 
-        creation
+        Ok((refund, creation))
+    }
+
+    #[private]
+    pub fn create_transaction_callback(
+        &mut self,
+        #[serializer(borsh)] sender: AccountId,
+        #[serializer(borsh)] token_id: String,
+        #[serializer(borsh)] deposit: AssetBalance,
+        #[serializer(borsh)] transaction_request: ValidTransactionRequest,
+        #[callback_result] local_asset_price_result: Result<pyth::Price, PromiseError>,
+        #[callback_result] foreign_asset_price_result: Result<pyth::Price, PromiseError>,
+    ) -> PromiseOrValue<TransactionSequenceCreation> {
+        // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
+        let (refund, creation) = match self.try_create_transaction_callback(
+            &sender,
+            token_id,
+            &deposit,
+            transaction_request,
+            local_asset_price_result,
+            foreign_asset_price_result,
+        ) {
+            Ok((refund, creation)) => (refund, creation),
+            Err(e) => {
+                // Failure: return deposit.
+                return PromiseOrValue::Promise(
+                    deposit
+                        .asset_id
+                        .transfer(sender, deposit.amount)
+                        .then(Self::ext(env::current_account_id()).throw(e.to_string())),
+                );
+            }
+        };
+
+        if refund > 0 {
+            // Refund excess
+            deposit.asset_id.transfer(sender, refund);
+        }
+
+        PromiseOrValue::Value(creation)
+    }
+
+    #[private]
+    pub fn throw(&mut self, #[serializer(borsh)] error_str: String) {
+        env::panic_str(&error_str);
     }
 
     pub fn sign_next(&mut self, id: U64) -> Promise {
@@ -544,7 +505,7 @@ impl Contract {
 
         #[allow(clippy::cast_possible_truncation)]
         let ret = ext_chain_key_token::ext(self.signer_contract_id.clone()) // TODO: Gas.
-            .with_attached_deposit(1)
+            .with_attached_deposit(NearToken::from_yoctonear(1))
             .ckt_sign_hash(
                 next_signature_request.token_id.clone(),
                 None,
@@ -553,7 +514,7 @@ impl Contract {
             )
             .then(
                 Self::ext(env::current_account_id())
-                    .with_static_gas(near_sdk::Gas::ONE_TERA * 3)
+                    .with_static_gas(Gas::from_tgas(3))
                     .with_unused_gas_weight(0)
                     .sign_next_callback(id.into(), index as u32),
             );
@@ -700,24 +661,6 @@ impl Contract {
         ret
     }
 }
-#[derive(Debug, Error)]
-#[error("Configuration for chain ID {chain_id} does not exist")]
-pub struct ChainConfigurationDoesNotExistError {
-    pub chain_id: u64,
-}
-
-#[derive(Debug, Error)]
-#[error("Transaction sequence with ID {transaction_sequence_id} does not exist")]
-pub struct TransactionSequenceDoesNotExistError {
-    pub transaction_sequence_id: u64,
-}
-
-#[derive(Debug, Error)]
-#[error("Signature request {transaction_sequence_id}.{index} does not exist")]
-pub struct SignatureRequestDoesNoteExistError {
-    pub transaction_sequence_id: u64,
-    pub index: u32,
-}
 
 impl Contract {
     #[allow(clippy::unused_self)]
@@ -777,9 +720,56 @@ impl Contract {
         }
     }
 
+    /// Create a paymaster funding transaction that provides funding for the
+    /// maximum amount of gas required by the transaction.
+    ///
+    /// # Errors
+    ///
+    /// - If the foreign chain ID is not supported.
+    /// - If there is not a paymaster configured for the foreign chain.
+    /// - If the price data provided is invalid.
+    /// - If the paymaster does not have enough available balance.
+    pub fn create_funding_signature_request(
+        &self,
+        foreign_chain: &mut ForeignChainConfiguration,
+        transaction: &ValidTransactionRequest,
+        sender_foreign_address: ForeignAddress,
+        gas_tokens_to_sponsor_transaction: U256,
+    ) -> Result<SignatureRequest, RequestNonceError> {
+        foreign_chain.with_request_nonce(
+            gas_tokens_to_sponsor_transaction,
+            |foreign_chain, paymaster| {
+                let paymaster_transaction = ValidTransactionRequest {
+                    chain_id: transaction.chain_id,
+                    to: sender_foreign_address,
+                    value: gas_tokens_to_sponsor_transaction.0,
+                    gas: foreign_chain.transfer_gas,
+                    data: vec![],
+                    nonce: U256::from(paymaster.nonce).0,
+                    access_list_rlp: vec![0xc0 /* rlp encoding for empty list */],
+                    max_priority_fee_per_gas: transaction.max_priority_fee_per_gas,
+                    max_fee_per_gas: transaction.max_fee_per_gas,
+                };
+
+                let paymaster_authorization = self
+                    .paymaster_keys
+                    .get(&paymaster.token_id)
+                    .unwrap_or_reject() // inconsistent state if this fails
+                    .authorization;
+
+                SignatureRequest::new(
+                    &paymaster.token_id,
+                    paymaster_authorization,
+                    paymaster_transaction,
+                    true,
+                )
+            },
+        )
+    }
+
     fn insert_transaction_sequence(
         &mut self,
-        pending_transaction: PendingTransactionSequence,
+        pending_transaction: &PendingTransactionSequence,
     ) -> TransactionSequenceCreation {
         #[allow(clippy::cast_possible_truncation)]
         let pending_signature_count = pending_transaction.signature_requests.len() as u32;
@@ -787,7 +777,7 @@ impl Contract {
         let id = self.generate_unique_id();
 
         self.pending_transaction_sequences
-            .insert(&id, &pending_transaction);
+            .insert(&id, pending_transaction);
 
         TransactionSequenceCreation {
             id: id.into(),

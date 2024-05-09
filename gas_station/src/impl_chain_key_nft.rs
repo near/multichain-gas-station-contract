@@ -4,11 +4,8 @@ use lib::{
     Rejectable,
 };
 use near_sdk::{
-    borsh,
-    collections::UnorderedMap,
-    env, near_bindgen, require,
-    serde::{Deserialize, Serialize},
-    AccountId, Promise, PromiseError, PromiseOrValue,
+    collections::UnorderedMap, env, near, near_bindgen, require, AccountId, Promise, PromiseError,
+    PromiseOrValue,
 };
 use near_sdk_contract_tools::{
     nft::{ext_nep171, Nep171Receiver, TokenId},
@@ -19,8 +16,8 @@ use near_sdk_contract_tools::{
 use crate::ContractExt;
 use crate::{ChainKeyAuthorization, ChainKeyData, Contract, Role, StorageKey};
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(crate = "near_sdk::serde")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[near(serializers = [json])]
 pub struct ChainKeyReceiverMsg {
     pub is_paymaster: bool,
 }
