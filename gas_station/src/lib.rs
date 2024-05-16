@@ -283,12 +283,12 @@ impl Contract {
             let chain_id = transaction.chain_id();
             let foreign_chain_configuration = self.get_chain(chain_id.as_u64()).unwrap_or_reject();
 
-            ext_pyth::ext(self.oracle_id.as_str().parse().unwrap())
+            ext_pyth::ext(self.oracle_id.clone())
                 .get_price(pyth::PriceIdentifier(accepted_local_asset.oracle_asset_id))
                 .and(
-                    ext_pyth::ext(self.oracle_id.as_str().parse().unwrap()).get_price(
-                        pyth::PriceIdentifier(foreign_chain_configuration.oracle_asset_id),
-                    ),
+                    ext_pyth::ext(self.oracle_id.clone()).get_price(pyth::PriceIdentifier(
+                        foreign_chain_configuration.oracle_asset_id,
+                    )),
                 )
                 .then(
                     Self::ext(env::current_account_id()).create_transaction_callback(

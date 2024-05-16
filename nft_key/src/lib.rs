@@ -48,11 +48,7 @@ impl NftKeyContract {
             key_data: UnorderedMap::new(StorageKey::KeyData),
         };
 
-        contract.set_contract_metadata(&ContractMetadata::new(
-            "Chain Key Token".to_string(),
-            "CKT".to_string(),
-            None,
-        ));
+        contract.set_contract_metadata(&ContractMetadata::new("Chain Key Token", "CKT", None));
 
         contract
     }
@@ -230,7 +226,7 @@ impl NftKeyContract {
     }
 
     #[private]
-    pub fn ck_approve_callback(
+    pub fn ckt_approve_callback(
         &mut self,
         #[serializer(borsh)] token_id: u32,
         #[serializer(borsh)] account_id: AccountId,
@@ -249,7 +245,7 @@ impl NftKeyContract {
     }
 
     #[private]
-    pub fn ck_revoke_callback(&self) {}
+    pub fn ckt_revoke_callback(&self) {}
 
     fn require_is_token_owner(&self, predecessor: &AccountId, token_id: &TokenId) {
         let actual_owner = Nep171Controller::token_owner(self, token_id);
@@ -305,7 +301,7 @@ impl ChainKeyTokenApproval for NftKeyContract {
         PromiseOrValue::Promise(
             ext_chain_key_token_approval_receiver::ext(account_id.clone())
                 .ckt_on_approved(predecessor, token_id, approval_id, msg.unwrap_or_default())
-                .then(Self::ext(env::current_account_id()).ck_approve_callback(
+                .then(Self::ext(env::current_account_id()).ckt_approve_callback(
                     id,
                     account_id,
                     approval_id,
@@ -344,7 +340,7 @@ impl ChainKeyTokenApproval for NftKeyContract {
                         revoked_approval_id,
                         msg.unwrap_or_default(),
                     )
-                    .then(Self::ext(env::current_account_id()).ck_revoke_callback()),
+                    .then(Self::ext(env::current_account_id()).ckt_revoke_callback()),
             )
         } else {
             PromiseOrValue::Value(())
