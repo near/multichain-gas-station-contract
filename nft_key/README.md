@@ -51,13 +51,15 @@ Therefore, this contract implements a separate set of approval management functi
 ```rust
 #[ext_contract(ext_chain_key_token_approval)]
 pub trait ChainKeyTokenApproval {
-    fn ckt_approve(
+    fn ckt_approve(&mut self, token_id: String, account_id: AccountId) -> u32;
+    fn ckt_approve_call(
         &mut self,
         token_id: String,
         account_id: AccountId,
         msg: Option<String>,
     ) -> PromiseOrValue<Option<u32>>;
-    fn ckt_revoke(
+    fn ckt_revoke(&mut self, token_id: String, account_id: AccountId);
+    fn ckt_revoke_call(
         &mut self,
         token_id: String,
         account_id: AccountId,
@@ -75,7 +77,7 @@ pub trait ChainKeyTokenApprovalReceiver {
         token_id: String,
         approval_id: u32,
         msg: String,
-    ) -> PromiseOrValue<()>;
+    ) -> PromiseOrValue<bool>;
     fn ckt_on_revoked(
         &mut self,
         approver_id: AccountId,
@@ -86,14 +88,14 @@ pub trait ChainKeyTokenApprovalReceiver {
 }
 ```
 
-#### `ckt_approve`
+#### `ckt_approve[_call]`
 
-Issue an approval to a receiving account. This allows the account to issue signatures on behalf of this token and all of its sub-paths.
+Issue an approval to a receiving account. This allows the account to issue signatures on behalf of this token and all of its sub-paths. Use the `_call` variant to alert the receiving contract of the approval via its `ckt_on_approved` function.
 
-#### `ckt_revoke`
+#### `ckt_revoke[_call]`
 
-Remove an approval from an account. This prevents the account from issuing more signatures.
+Remove an approval from an account. This prevents the account from issuing more signatures. Use the `_call` variant to alert the receiving contract of the revocation (ex post facto) via its `ckt_on_revoked` function.
 
 #### `ckt_revoke_all`
 
-Remove all approvals for a token. The equivalent of this function is called whenever a chain key NFT is transferred.
+Remove all approvals for a token. The equivalent of this function is called whenever a chain key NFT is transferred. There is no `_call` variant.
