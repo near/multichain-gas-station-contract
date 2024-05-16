@@ -4,8 +4,8 @@ use lib::{
     Rejectable,
 };
 use near_sdk::{
-    assert_one_yocto, collections::UnorderedMap, env, near, require, AccountId, BorshStorageKey,
-    NearToken, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
+    assert_one_yocto, collections::UnorderedMap, env, near, require, AccountId, AccountIdRef,
+    BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
 use near_sdk_contract_tools::hook::Hook;
 #[allow(clippy::wildcard_imports)]
@@ -51,6 +51,15 @@ impl NftKeyContract {
         contract.set_contract_metadata(&ContractMetadata::new("Chain Key Token", "CKT", None));
 
         contract
+    }
+
+    #[cfg(feature = "debug")]
+    pub fn set_signer_contract_id(&mut self, account_id: AccountId) {
+        self.signer_contract_id = account_id;
+    }
+
+    pub fn get_signer_contract_id(&self) -> &AccountIdRef {
+        &self.signer_contract_id
     }
 
     fn generate_id(&mut self) -> u32 {

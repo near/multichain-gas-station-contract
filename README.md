@@ -8,10 +8,10 @@
 
 This smart contract accepts payments in NEAR tokens in exchange for gas funding on non-NEAR foreign chains. Part of the NEAR Multichain effort, it works in conjunction with the [MPC recovery service](https://github.com/near/mpc-recovery) to generate on-chain signatures.
 
-| Contract      | Testnet ID          | Mainnet ID |
-| ------------- | ------------------- | ---------- |
-| NFT Chain Key | `nft.kagi.testnet`  | &mdash;    |
-| Gas Station   | `canhazgas.testnet` | &mdash;    |
+| Contract      | Testnet ID            | Mainnet ID |
+| ------------- | --------------------- | ---------- |
+| NFT Chain Key | `v2.nft.kagi.testnet` | &mdash;    |
+| Gas Station   | `canhazgas.testnet`   | &mdash;    |
 
 ## What is it?
 

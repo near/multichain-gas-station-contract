@@ -5,18 +5,26 @@
 1. Deploy
 
    ```sh
-   near contract deploy canhazgas.testnet use-file ./target/wasm32-unknown-unknown/release/gas_station.wasm with-init-call new_debug json-args '{"oracle_id":"pyth-oracle.testnet","signer_contract_id":"nft.kagi.testnet","supported_assets_oracle_asset_ids":[["Native","3gnSbT7bhoTdGkFVZc1dW1PvjreWzpUNUD5ppXwv1N59"]]}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
+   near contract deploy canhazgas.testnet use-file ./target/near/gas_station/gas_station.wasm with-init-call new_debug json-args '{"oracle_id":"pyth-oracle.testnet","signer_contract_id":"v2.nft.kagi.testnet"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
    ```
 
-2. Add foreign chain
+2. Add supported deposit assets
+
+   **Native NEAR**
 
    ```sh
-   near contract call-function as-transaction canhazgas.testnet add_foreign_chain json-args '{"chain_id":"97","oracle_asset_id":"EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw","transfer_gas":"21000","fee_rate":["120","100"]}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
+   near contract call-function as-transaction canhazgas.testnet add_accepted_local_asset json-args '{"asset_id":"Native","decimals":24,"oracle_asset_id":"3gnSbT7bhoTdGkFVZc1dW1PvjreWzpUNUD5ppXwv1N59"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as hatchet.testnet network-config testnet sign-with-legacy-keychain send
+   ```
+
+3. Add foreign chain
+
+   ```sh
+   near contract call-function as-transaction canhazgas.testnet add_foreign_chain json-args '{"chain_id":"97","oracle_asset_id":"EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw","transfer_gas":"21000","fee_rate":["120","100"],"decimals":18}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
    ```
 
    **Note**: This script currently uses the ETH/USD price identifier despite the chain ID being that of BSC. This is because the Pyth price feed for BNB/USD on NEAR testnet is currently not working.
 
-3. Add paymaster
+4. Add paymaster
 
    **Add administrator if necessary**
 
@@ -27,7 +35,7 @@
    **Transfer chain key NFT**
 
    ```sh
-   near contract call-function as-transaction nft.kagi.testnet ckt_approve json-args '{"token_id":"1","account_id":"canhazgas.testnet","msg":"{\"is_paymaster\":true}"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as hatchet.testnet network-config testnet sign-with-legacy-keychain send
+   near contract call-function as-transaction v2.nft.kagi.testnet ckt_approve_call json-args '{"token_id":"1","account_id":"canhazgas.testnet","msg":"{\"is_paymaster\":true}"}' prepaid-gas '100.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as hatchet.testnet network-config testnet sign-with-legacy-keychain send
    ```
 
    **Mark key for use as paymaster**
