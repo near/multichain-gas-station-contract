@@ -190,7 +190,7 @@ impl ChainKeyToken for NftKeyContract {
                         "path": format!("{id},{path}"),
                     }))
                     .unwrap_or_reject(),
-                    NearToken::from_yoctonear(0),
+                    near_sdk::NearToken::from_yoctonear(0),
                     env::prepaid_gas().saturating_div(10),
                 ),
             )

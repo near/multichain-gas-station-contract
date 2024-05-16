@@ -18,7 +18,7 @@ tokio = "1.28"
 crate-type = ["cdylib"]
 
 [features]
-default = ["debug", "real-kdf"]
+default = ["debug"]
 
 debug = []
 
