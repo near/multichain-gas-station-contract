@@ -29,7 +29,7 @@ impl Nep141Receiver for Contract {
             token_id,
             transaction_rlp_hex,
             use_paymaster,
-        }) = near_sdk::serde_json::from_str::<Nep141ReceiverCreateTransactionArgs>(&msg)
+        }) = near_sdk::serde_json::from_str(&msg)
         else {
             return PromiseOrValue::Value(0.into());
         };

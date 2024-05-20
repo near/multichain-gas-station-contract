@@ -37,6 +37,20 @@ impl Contract {
         <Self as Rbac>::iter_members_of(&Role::Administrator).collect()
     }
 
+    pub fn add_market_maker(&mut self, account_id: AccountId) {
+        <Self as Rbac>::require_role(&Role::Administrator);
+        self.add_role(&account_id, &Role::MarketMaker);
+    }
+
+    pub fn remove_market_maker(&mut self, account_id: AccountId) {
+        <Self as Rbac>::require_role(&Role::Administrator);
+        self.remove_role(&account_id, &Role::MarketMaker);
+    }
+
+    pub fn get_market_makers(&self) -> Vec<AccountId> {
+        <Self as Rbac>::iter_members_of(&Role::MarketMaker).collect()
+    }
+
     pub fn pause(&mut self) {
         <Self as Rbac>::require_role(&Role::Administrator);
         <Self as Pause>::pause(self);
@@ -234,7 +248,7 @@ impl Contract {
 
     pub fn set_paymaster_balance(&mut self, chain_id: U64, token_id: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
-        <Self as Rbac>::require_role(&Role::Administrator);
+        <Self as Rbac>::require_role(&Role::MarketMaker);
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
@@ -245,7 +259,7 @@ impl Contract {
 
     pub fn increase_paymaster_balance(&mut self, chain_id: U64, token_id: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
-        <Self as Rbac>::require_role(&Role::Administrator);
+        <Self as Rbac>::require_role(&Role::MarketMaker);
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
@@ -257,7 +271,7 @@ impl Contract {
 
     pub fn set_paymaster_nonce(&mut self, chain_id: U64, token_id: String, nonce: u32) {
         #[cfg(not(feature = "debug"))]
-        <Self as Rbac>::require_role(&Role::Administrator);
+        <Self as Rbac>::require_role(&Role::MarketMaker);
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
@@ -337,6 +351,7 @@ impl Contract {
             .collect()
     }
 
+    #[payable]
     pub fn withdraw_collected_fees(
         &mut self,
         asset_id: AssetId,
@@ -344,7 +359,7 @@ impl Contract {
         receiver_id: Option<AccountId>, // TODO: Pull method instead of push (danger of typos/locked accounts)
     ) -> Promise {
         near_sdk::assert_one_yocto();
-        <Self as Rbac>::require_role(&Role::Administrator);
+        <Self as Rbac>::require_role(&Role::MarketMaker);
         let mut fees = self
             .collected_fees
             .get(&asset_id)

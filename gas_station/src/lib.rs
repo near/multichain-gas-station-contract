@@ -156,6 +156,7 @@ pub enum StorageKey {
 #[near]
 pub enum Role {
     Administrator,
+    MarketMaker,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,8 +166,6 @@ pub struct LocalAssetConfiguration {
     pub decimals: u8,
 }
 
-// TODO: Cooldown timer/lock on nft keys before they can be returned to the user or used again in the gas station contract to avoid race condition
-// TODO: Storage management
 #[derive(PanicOnDefault, Debug, Pause, Rbac)]
 #[rbac(roles = "Role")]
 #[near(contract_state)]
@@ -257,7 +256,7 @@ impl Contract {
             ValidTransactionRequest::try_from(decode_transaction_request(&transaction_rlp_hex))
                 .unwrap_or_reject();
 
-        // Guarantees invariants required in callback
+        // Whitelisting
         self.filter_transaction(&account_id, &transaction);
 
         // Assert predecessor can use requested key path
@@ -435,7 +434,6 @@ impl Contract {
         #[callback_result] local_asset_price_result: Result<pyth::Price, PromiseError>,
         #[callback_result] foreign_asset_price_result: Result<pyth::Price, PromiseError>,
     ) -> PromiseOrValue<TransactionSequenceCreation> {
-        // TODO: Ensure that deposit is returned if any recoverable errors are encountered.
         let (refund, creation) = match self.try_create_transaction_callback(
             &sender,
             token_id,
@@ -504,7 +502,7 @@ impl Contract {
         next_signature_request.status = Status::InFlight;
 
         #[allow(clippy::cast_possible_truncation)]
-        let ret = ext_chain_key_token::ext(self.signer_contract_id.clone()) // TODO: Gas.
+        let ret = ext_chain_key_token::ext(self.signer_contract_id.clone())
             .with_attached_deposit(NearToken::from_yoctonear(1))
             .ckt_sign_hash(
                 next_signature_request.token_id.clone(),
@@ -554,8 +552,7 @@ impl Contract {
             ));
         }
 
-        // TODO: What to do if signing fails?
-        // TODO: Refund the amount to the paymaster account?
+        // TODO: Fraud proofs.
         let signature = result
             .ok()
             .expect_or_reject("Failed to produce signature")
@@ -616,7 +613,6 @@ impl Contract {
             ContractEvent::TransactionSequenceSigned(e).emit();
 
             // Remove transaction if all requests have been signed
-            // TODO: Is this over-eager?
             self.pending_transaction_sequences.remove(&id);
         }
 

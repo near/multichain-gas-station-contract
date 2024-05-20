@@ -38,12 +38,13 @@ struct Setup {
     alice: Account,
     alice_key: String,
     paymaster_key: String,
+    mark_the_market_maker: Account,
 }
 
 async fn setup() -> Setup {
     let worker = near_workspaces::sandbox().await.unwrap();
 
-    let (gas_station, oracle, signer, nft_key, local_ft, alice) = tokio::join!(
+    let (gas_station, oracle, signer, nft_key, local_ft, alice, mark_the_market_maker) = tokio::join!(
         async {
             let wasm = near_workspaces::compile_project("./").await.unwrap();
             worker.dev_deploy(&wasm).await.unwrap()
@@ -80,6 +81,7 @@ async fn setup() -> Setup {
             c
         },
         async { worker.dev_create_account().await.unwrap() },
+        async { worker.dev_create_account().await.unwrap() },
     );
 
     println!("{:<16} {}", "Gas Station:", gas_station.id());
@@ -88,6 +90,7 @@ async fn setup() -> Setup {
     println!("{:<16} {}", "NFT Key:", nft_key.id());
     println!("{:<16} {}", "Local FT:", local_ft.id());
     println!("{:<16} {}", "Alice:", alice.id());
+    println!("{:<16} {}", "Mark:", mark_the_market_maker.id());
 
     println!("Initializing the contracts...");
 
@@ -126,6 +129,9 @@ async fn setup() -> Setup {
             "transfer_gas": "21000",
             "fee_rate": ["120", "100"],
             "decimals": 18,
+        })))
+        .call(Function::new("add_market_maker").args_json(json!({
+            "account_id": mark_the_market_maker.id(),
         })))
         .transact()
         .await
@@ -241,6 +247,7 @@ async fn setup() -> Setup {
         alice,
         alice_key,
         paymaster_key,
+        mark_the_market_maker,
     }
 }
 
@@ -459,10 +466,12 @@ async fn fail_unsupported_chain_id() {
 async fn test_workflow_happy_path() {
     let Setup {
         gas_station,
+        oracle,
         local_ft,
         alice,
         alice_key,
         paymaster_key,
+        mark_the_market_maker,
         ..
     } = setup().await;
 
@@ -639,6 +648,102 @@ async fn test_workflow_happy_path() {
 
     println!("List of signed transactions:");
     println!("{signed_transaction_sequences:?}");
+
+    println!("Testing market maker withdrawals...");
+
+    let (local_asset_price, foreign_asset_price, fees_to_withdraw) = tokio::join!(
+        async {
+            oracle
+                .view("get_price")
+                .args_json(json!({
+                    "price_identifier": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
+                }))
+                .await
+                .unwrap()
+                .json::<pyth::Price>()
+                .unwrap()
+        },
+        async {
+            oracle
+                .view("get_price")
+                .args_json(json!({
+                    "price_identifier": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
+                }))
+                .await
+                .unwrap()
+                .json::<pyth::Price>()
+                .unwrap()
+        },
+        async {
+            gas_station
+                .view("get_collected_fees")
+                .args_json(json!({}))
+                .await
+                .unwrap()
+                .json::<std::collections::HashMap<AssetId, U128>>()
+                .unwrap()
+        },
+    );
+
+    let price_estimation = gas_station
+        .view("estimate_fee")
+        .args_json(json!({
+            "transaction_rlp_hex": hex::encode_prefixed(&eth_transaction.rlp()),
+            "local_asset_price": local_asset_price,
+            "local_asset_decimals": 24,
+            "foreign_asset_price": foreign_asset_price,
+            "foreign_asset_decimals": 18,
+        }))
+        .await
+        .unwrap()
+        .json::<U128>()
+        .unwrap()
+        .0;
+
+    assert_eq!(
+        price_estimation,
+        fees_to_withdraw.get(&AssetId::Native).unwrap().0,
+        "Exactly one transaction worth of fees are ready to be withdrawn",
+    );
+
+    let balance_before = mark_the_market_maker.view_account().await.unwrap().balance;
+
+    let alice_cannot_withdraw_fees = alice
+        .call(gas_station.id(), "withdraw_collected_fees")
+        .args_json(json!({
+            "asset_id": AssetId::Native,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .transact()
+        .await
+        .unwrap();
+
+    assert!(
+        alice_cannot_withdraw_fees.is_failure(),
+        "Alice is not a market maker"
+    );
+
+    mark_the_market_maker
+        .call(gas_station.id(), "withdraw_collected_fees")
+        .args_json(json!({
+            "asset_id": AssetId::Native,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .transact()
+        .await
+        .unwrap()
+        .unwrap();
+
+    println!("Market maker withdrawal succeeded.");
+
+    let balance_after = mark_the_market_maker.view_account().await.unwrap().balance;
+
+    let delta = balance_after.checked_sub(balance_before).unwrap();
+    assert!(
+        delta.as_yoctonear().abs_diff(price_estimation)
+            < NearToken::from_millinear(1).as_yoctonear(), // allow for variation due to gas
+        "One transaction worth of fees withdrawn",
+    );
 }
 
 #[tokio::test]
