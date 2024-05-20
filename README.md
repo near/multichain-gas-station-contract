@@ -62,7 +62,7 @@ Therefore, the call trace for the two `sign_next` transactions looks something l
 - [`cargo-make`](https://github.com/sagiegurari/cargo-make)
 - [`near-cli-rs`](https://github.com/near/near-cli-rs)
 
-## Build
+## Build the gas station
 
 ```bash
 cargo make build

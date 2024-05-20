@@ -99,3 +99,7 @@ Remove an approval from an account. This prevents the account from issuing more 
 #### `ckt_revoke_all`
 
 Remove all approvals for a token. The equivalent of this function is called whenever a chain key NFT is transferred. There is no `_call` variant.
+
+## Build
+
+To build this contract for mainnet, disable the `debug` flag and enable the `real-kdf` flag.
