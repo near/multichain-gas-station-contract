@@ -27,7 +27,7 @@ Currently, relaying one transaction to a foreign chain requires three transactio
 
 Transaction breakdown:
 
-1. The first transaction is a call to the `create_transaction` function. This function accepts an EVM transaction request payload, an NFT chain key token ID (must have been previously [approved](./nft_key/README.md#approvals) to the gas station smart contract), and a deposit amount (to pay for gas on the foreign chain) and returns an `id` and a `pending_transactions_count`.
+1. The first transaction is a call to the `create_transaction` function. This function accepts an EVM transaction request payload, an NFT chain key token ID `token_id` (must have been previously [approved](./nft_key/README.md#approvals) to the gas station smart contract), and a deposit amount (to pay for gas on the foreign chain) and returns an `id` and a `pending_transactions_count`.
 2. The second transaction is a call to the `sign_next` function. This function accepts the `id` returned in step 1 and returns a signed payload. This payload is the gas funding transaction, transferring funds from a paymaster account on the foreign chain to the user's account on the foreign chain. It must be submitted to the foreign chain before the second signed payload.
 3. The third transaction is another call to the `sign_next` function, identical to the one before. This function accepts an `id` and returns a signed payload. This payload is the signed user transaction.
 
@@ -37,44 +37,33 @@ Once this service and its supporting services are live, the multichain relayer s
 
 ### `sign_next` call trace explanation
 
-Let's say `alice.near` has already called `create_transaction(..., use_paymaster=true)` on the gas station contract `gas-station.near`, and has obtained a transaction sequence `id` as a result of that function call.
+Let's say `alice.near` has already called `create_transaction(..., token_id=..., use_paymaster=true)` on the gas station contract `gas-station.near`, and has obtained a transaction sequence `id` as a result of that function call.
 
-Next, `alice.near` calls `gas-station.near::sign_next(id)`. Because this is the first `sign_next` call, the contract first generates a paymaster gas funding transaction. However, this is payload is unsigned at first. It is unwise[^unwise] to keep private keys on-chain (they would cease to be private), so the contract invokes another service, the MPC signing service.
+Next, `alice.near` calls `gas-station.near::sign_next(id)`. Because this is the first `sign_next` call, the contract first generates a paymaster gas funding transaction. However, this is payload is unsigned at first. It is unwise[^unwise] to keep private keys on-chain (they would cease to be private), so the contract invokes [the NFT chain key contract](./nft_key), which invokes another service, the MPC signing service.
 
 [^unwise]: The debug/mock version of this contract _does_ store private keys on-chain (**big no-no**), making it _only suitable for testing_.
 
-This service allows us to request signatures from a particular private key that the gas station contract controls. The MPC service allows the gas station contract to request a key by "path," which is simply a string. The signing service then uses a combination of the predecessor account ID (in this case, `gas-station.near`), the path string provided as a parameter to the signature request, and a few other pieces of information to derive a recoverable signature for the payload that recovers to a stable public key.
+This service allows us to request signatures from a particular private key that the gas station contract controls. The MPC service allows contracts to request a key by "path," which is simply a string. The signing service then uses a combination of the predecessor account ID (like `nft-key.near`), the path string provided as a parameter to the signature request, and a few other pieces of information to derive a recoverable signature for the payload that recovers to a stable public key.
 
-In the case of the paymaster transaction, the gas station uses a special set of predetermined path strings that map to known addresses on the foreign chain. These addresses are pre-funded with the native (gas) token for that foreign chain. Thus, when the gas station contract requests signatures for the paymaster transaction payload, the signed transactions are able to manipulate the funds in that foreign account.
+In the case of the paymaster transaction, the gas station uses a set of NFT keys that map to known addresses on the foreign chain. These addresses are pre-funded with the native (gas) token for that foreign chain. Thus, when the gas station contract requests signatures for the paymaster transaction payload, the signed transactions are able to manipulate the funds in that foreign account.
 
-In the case of the second, user-provided transaction, the gas station passes the user's account ID as the path string to the MPC signer service. This means that each transaction requested by `alice.near` will receive a signature that recovers to the same public key (foreign address) every time.
+In the case of the second, user-provided transaction, the gas station uses an NFT key that the user has previously `ckt_approve_call`-ed to the gas station. This means that each transaction requested by `alice.near` will receive a signature that recovers to the same public key (foreign address) every time.
 
 Therefore, the call trace for the two `sign_next` transactions looks something like this:
 
 1. `alice.near` &rarr; `gas-station.near::sign_next(id) -> SignedTransaction`
-   - `gas-station.near` &rarr; `mpc-signer.near::sign(payload=..., path=$0) -> Signature`
+   - `gas-station.near` &rarr; `nft-key.near::sign(payload=gas_funding_tx, token_id=paymaster_token_id) -> Signature`
+   - `nft-key.near` &rarr; `mpc-signer.near::sign(payload=gas_funding_tx, path=paymaster_token_id) -> Signature`
 2. `alice.near` &rarr; `gas-station.near::sign_next(id) -> SignedTransaction`
-   - `gas-station.near` &rarr; `mpc-signer.near::sign(payload=..., path=alice.near) -> Signature`
+   - `gas-station.near` &rarr; `nft-key.near::sign(payload=user_tx, token_id=token_id) -> Signature`
+   - `nft-key.near` &rarr; `mpc-signer.near::sign(payload=user_tx, path=token_id) -> Signature`
 
 ## Requirements
 
 - Rust & Cargo
 - [`cargo-make`](https://github.com/sagiegurari/cargo-make)
+- [`cargo-near`](https://github.com/near/cargo-near)
 - [`near-cli-rs`](https://github.com/near/near-cli-rs)
-
-## Build the gas station
-
-```bash
-cargo make build
-```
-
-The WASM binary will be generated in `target/wasm32-unknown-unknown/release/`.
-
-The debug build can be generated with the command:
-
-```bash
-cargo make build-debug
-```
 
 ## Contract Interactions
 
@@ -88,8 +77,15 @@ cargo make build-debug
 
 Users who wish to get transactions signed and relayed by this contract and its accompanying infrastructure should perform the following steps:
 
+#### First time
+
+1. Create an NFT chain key.
+2. `ckt_approve_call` the NFT chain key to the gas station contract.
+
+#### Every time
+
 1. Construct an unsigned transaction payload for the foreign chain they wish to interact with, e.g. Ethereum.
-2. Call `create_transaction` on this contract, passing in that payload and activating the `use_paymaster` toggle in the case that the user wishes to use a paymaster. If the user uses a paymaster, he must attach a sufficient quantity of NEAR tokens to this transaction to pay for the gas + service fee. This function call returns an `id` and a `pending_transactions_count`.
+2. Call `create_transaction` on this contract, passing in your NFT chain key ID, that payload, and activating the `use_paymaster` toggle in the case that the user wishes to use a paymaster. If the user uses a paymaster, he must attach a sufficient quantity of NEAR (or whatever accepted local asset is configured) tokens to this transaction to pay for the gas + service fee. This function call returns an `id` and a `pending_transactions_count`.
 3. Call `sign_next`, passing in the `id` value obtained in the previous step. This transaction should be executed with the maximum allowable quantity of gas (i.e. 300 TGas). This transaction will return a signed payload, part of the sequence of transactions necessary to send the user's transaction to the foreign chain. Repeat `pending_transactions_count` times.
 4. Relay each signed payload to the foreign chain RPC in the order they were requested.
 
