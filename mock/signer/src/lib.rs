@@ -30,6 +30,7 @@ impl MockSignerContract {
 
 #[near]
 impl SignerInterface for MockSignerContract {
+    #[payable]
     fn sign(
         &mut self,
         payload: [u8; 32],
