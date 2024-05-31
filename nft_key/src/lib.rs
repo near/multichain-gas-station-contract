@@ -1,6 +1,6 @@
 use lib::{
     chain_key::{ext_chain_key_token_approval_receiver, ChainKeyToken, ChainKeyTokenApproval},
-    signer::{ext_signer, MpcSignature},
+    signer::{ext_signer, MpcSignature, SignRequest},
     Rejectable,
 };
 use near_sdk::{
@@ -147,11 +147,11 @@ impl ChainKeyToken for NftKeyContract {
         PromiseOrValue::Promise(
             ext_signer::ext(self.signer_contract_id.clone())
                 .with_unused_gas_weight(10)
-                .sign(
-                    payload.try_into().unwrap(),
-                    &format!("{token_id},{path}"),
-                    0,
-                )
+                .sign(SignRequest {
+                    payload: payload.try_into().unwrap(),
+                    path: format!("{token_id},{path}"),
+                    key_version: 0,
+                })
                 .then(
                     Self::ext(env::current_account_id())
                         .with_static_gas(near_sdk::Gas::from_tgas(3))

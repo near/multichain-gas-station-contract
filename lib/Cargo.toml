@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+borsh.workspace = true
+serde.workspace = true
 ethers-core.workspace = true
 getrandom = { version = "0.2", features = [
     "custom",

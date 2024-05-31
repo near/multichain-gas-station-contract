@@ -1,3 +1,4 @@
+use borsh::{BorshDeserialize, BorshSerialize};
 use ethers_core::{
     k256::{
         self,
@@ -24,19 +25,17 @@ use thiserror::Error;
 #[allow(clippy::ptr_arg)]
 #[ext_contract(ext_signer)]
 pub trait SignerInterface {
-    fn sign(
-        &mut self,
-        payload: [u8; 32],
-        path: &String,
-        key_version: u32,
-    ) -> PromiseOrValue<MpcSignature>;
+    fn sign(&mut self, request: SignRequest) -> PromiseOrValue<MpcSignature>;
     fn public_key(&self) -> near_sdk::PublicKey;
     fn latest_key_version(&self) -> u32;
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
 #[serde(crate = "near_sdk::serde")]
-pub struct MpcSignature(pub String, pub String);
+pub struct MpcSignature {
+    pub big_r: String,
+    pub s: String,
+}
 
 impl MpcSignature {
     #[must_use]
@@ -46,7 +45,10 @@ impl MpcSignature {
             u8::from(v.is_y_odd()).into(),
         ))?;
 
-        Some(Self(hex::encode(big_r.to_bytes()), hex::encode(s)))
+        Some(Self {
+            big_r: hex::encode(big_r.to_bytes()),
+            s: hex::encode(s),
+        })
     }
 
     #[must_use]
@@ -73,7 +75,12 @@ pub enum MpcSignatureDecodeError {
 impl TryFrom<MpcSignature> for ethers_core::types::Signature {
     type Error = MpcSignatureDecodeError;
 
-    fn try_from(MpcSignature(big_r_hex, s_hex): MpcSignature) -> Result<Self, Self::Error> {
+    fn try_from(
+        MpcSignature {
+            big_r: big_r_hex,
+            s: s_hex,
+        }: MpcSignature,
+    ) -> Result<Self, Self::Error> {
         let big_r = Option::<AffinePoint>::from(AffinePoint::from_bytes(
             hex::decode(big_r_hex)?[..].into(),
         ))
@@ -93,4 +100,11 @@ impl TryFrom<MpcSignature> for ethers_core::types::Signature {
             v: v.to_byte().into(),
         })
     }
+}
+
+#[derive(Serialize, Deserialize, BorshDeserialize, BorshSerialize, Debug)]
+pub struct SignRequest {
+    pub payload: [u8; 32],
+    pub path: String,
+    pub key_version: u32,
 }
