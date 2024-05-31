@@ -3,6 +3,8 @@ resolver = "2"
 members = ["gas_station", "lib", "mock/*", "nft_key"]
 
 [workspace.dependencies]
+serde = { version = "*", features = ["derive"] }
+borsh = "1.5.0"
 ethers-core = "2.0.13"
 near-sdk = "5.1"
 near-sdk-contract-tools = { version = "3.0.2" }

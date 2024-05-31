@@ -874,10 +874,10 @@ fn test_derive_new_mpc() {
     let tx: TypedTransaction = eth_transaction.into();
     let sighash = tx.sighash().to_fixed_bytes();
 
-    let mpc_signature = MpcSignature(
-        "03DAE1E75B650ABC6AD22C899FC4245A9F58E323320B7380872C1813A7DCEB0F95".to_string(),
-        "3FD2BC8430EC146E6D1B0EC64FE80EEDC0C483B95C8247FDFC5ADFC459BB3096".to_string(),
-    );
+    let mpc_signature = MpcSignature {
+        big_r: "03DAE1E75B650ABC6AD22C899FC4245A9F58E323320B7380872C1813A7DCEB0F95".to_string(),
+        s: "3FD2BC8430EC146E6D1B0EC64FE80EEDC0C483B95C8247FDFC5ADFC459BB3096".to_string(),
+    };
 
     let sig: ethers_core::types::Signature = mpc_signature.try_into().unwrap();
     let recovered_address = sig.recover(sighash).unwrap();

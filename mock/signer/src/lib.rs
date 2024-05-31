@@ -1,6 +1,6 @@
 use lib::{
     kdf::sha256,
-    signer::{MpcSignature, SignerInterface},
+    signer::{MpcSignature, SignRequest, SignerInterface},
 };
 use near_sdk::{env, near, require, AccountId, PromiseOrValue, PublicKey};
 
@@ -31,12 +31,12 @@ impl MockSignerContract {
 #[near]
 impl SignerInterface for MockSignerContract {
     #[payable]
-    fn sign(
-        &mut self,
-        payload: [u8; 32],
-        path: &String,
-        key_version: u32,
-    ) -> PromiseOrValue<MpcSignature> {
+    fn sign(&mut self, request: SignRequest) -> PromiseOrValue<MpcSignature> {
+        let SignRequest {
+            key_version,
+            path,
+            payload,
+        } = request;
         require!(key_version == 0, "Key version not supported");
         let predecessor = env::predecessor_account_id();
         // This is unused, but needs to be in the sign signature.
