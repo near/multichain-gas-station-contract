@@ -26,12 +26,40 @@ use thiserror::Error;
 pub trait SignerInterface {
     fn sign(
         &mut self,
-        payload: [u8; 32],
-        path: &String,
-        key_version: u32,
-    ) -> PromiseOrValue<MpcSignature>;
+        request: SignRequest
+    ) -> PromiseOrValue<MpcSignatureResponse>;
     fn public_key(&self) -> near_sdk::PublicKey;
     fn latest_key_version(&self) -> u32;
+}
+
+/// No published lib crate, so taken from:
+/// https://github.com/near/mpc/blob/9e73c2e352e5e2213032857cca4e7d0dc2af3508/chain-signatures/contract/src/primitives.rs#L211-L216
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(crate = "near_sdk::serde")]
+pub struct SignRequest {
+    pub payload: [u8; 32],
+    pub path: String,
+    pub key_version: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(crate = "near_sdk::serde")]
+pub struct SigBigR {
+    pub affine_point: String
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(crate = "near_sdk::serde")]
+pub struct SigS {
+    pub scalar: String
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(crate = "near_sdk::serde")]
+pub struct MpcSignatureResponse {
+    pub big_r: SigBigR,
+    pub s: SigS,
+    pub recovery_id: u32,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Debug, Clone, PartialEq, Eq)]
