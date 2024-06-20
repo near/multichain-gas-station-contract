@@ -3,6 +3,7 @@ use lib::{
     signer::{MpcSignature, SignerInterface},
 };
 use near_sdk::{env, near, require, AccountId, PromiseOrValue, PublicKey};
+use lib::signer::{MpcSignatureResponse, SigBigR, SignRequest, SigS};
 
 #[must_use]
 pub fn construct_spoof_key(
@@ -33,20 +34,28 @@ impl SignerInterface for MockSignerContract {
     #[payable]
     fn sign(
         &mut self,
-        payload: [u8; 32],
-        path: &String,
-        key_version: u32,
-    ) -> PromiseOrValue<MpcSignature> {
-        require!(key_version == 0, "Key version not supported");
+        request: SignRequest
+    ) -> PromiseOrValue<MpcSignatureResponse> {
+        require!(request.key_version == 0, "Key version not supported");
         let predecessor = env::predecessor_account_id();
         // This is unused, but needs to be in the sign signature.
-        let signing_key = construct_spoof_key(predecessor.as_bytes(), path.as_bytes());
-        let (sig, recid) = signing_key.sign_prehash_recoverable(&payload).unwrap();
-        PromiseOrValue::Value(MpcSignature::from_ecdsa_signature(sig, recid).unwrap())
+        let signing_key = construct_spoof_key(predecessor.as_bytes(), request.path.as_bytes());
+        let (sig, rec_id) = signing_key.sign_prehash_recoverable(&request.payload).unwrap();
+        let trad_signature = MpcSignature::from_ecdsa_signature(sig, rec_id).unwrap();
+        let res = MpcSignatureResponse {
+            big_r: SigBigR {
+                affine_point: trad_signature.0.to_uppercase(),
+            },
+            s: SigS {
+                scalar: trad_signature.1.to_uppercase()
+            },
+            recovery_id: 0
+        };
+        PromiseOrValue::Value(res)
     }
 
     fn public_key(&self) -> PublicKey {
-        "secp256k1:37aFybhUHCxRdDkuCcB3yHzxqK7N8EQ745MujyAQohXSsYymVeHzhLxKvZ2qYeRHf3pGFiAsxqFJZjpF9gP2JV5u"
+        "secp256k1:4NfTiv3UsGahebgTaHyD9vF8KYKMBnfd6kh94mK6xv8fGBiJB8TBtFMP5WWXz6B89Ac1fbpzPwAvoyQebemHFwx3"
             .parse()
             .unwrap()
     }
