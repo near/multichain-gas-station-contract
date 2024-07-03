@@ -30,7 +30,7 @@ use near_sdk::{
     near,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[near]
 #[repr(transparent)]
 pub struct PriceIdentifier(pub [u8; 32]);

@@ -1,6 +1,7 @@
 #![allow(clippy::too_many_lines)]
 
 use clap::{Parser, Subcommand};
+use futures_util::StreamExt;
 use lib::pyth::PriceIdentifier;
 use near_crypto::InMemorySigner;
 use near_fetch::{result::ExecutionFinalResult, signer::SignerExt};
@@ -13,7 +14,12 @@ use near_token::NearToken;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::{fmt::Display, path::PathBuf, str::FromStr};
+use std::{
+    fmt::Display,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
+use tokio::sync::mpsc;
 
 const USER_AGENT: &str = concat!("near-pyth/", env!("CARGO_PKG_VERSION"));
 
@@ -22,6 +28,15 @@ const USER_AGENT: &str = concat!("near-pyth/", env!("CARGO_PKG_VERSION"));
 struct Cli {
     #[arg(short, long, default_value = "https://hermes-beta.pyth.network")]
     endpoint: Url,
+
+    #[arg(long, short)]
+    contract_id: Option<AccountId>,
+
+    #[arg(long, short, default_value_t = default_network())]
+    network: String,
+
+    #[arg(long, short, default_value_t = NearToken::from_millinear(100))]
+    max_fee: NearToken,
 
     #[command(subcommand)]
     command: Command,
@@ -40,27 +55,18 @@ enum Command {
     },
     ContractGet {
         price_ids: Vec<String>,
-
-        #[arg(long, short)]
-        contract_id: Option<AccountId>,
-
-        #[arg(long, short, default_value_t = default_network())]
-        network: String,
     },
     Update {
         price_ids: Vec<String>,
 
         #[arg(long, short)]
         key_file: PathBuf,
+    },
+    StreamUpdate {
+        price_ids: Vec<String>,
 
         #[arg(long, short)]
-        contract_id: Option<AccountId>,
-
-        #[arg(long, short, default_value_t = default_network())]
-        network: String,
-
-        #[arg(long, short, default_value_t = NearToken::from_millinear(100))]
-        max_fee: NearToken,
+        key_file: PathBuf,
     },
 }
 
@@ -186,107 +192,6 @@ async fn push_update_to_chain(
         .unwrap()
 }
 
-impl Command {
-    pub async fn exec(
-        &self,
-        out: &mut impl std::io::Write,
-        client: &reqwest::Client,
-        endpoint: &Url,
-    ) -> std::io::Result<()> {
-        match self {
-            Command::ContractGet {
-                price_ids,
-                contract_id,
-                network,
-            } => {
-                let resolved = resolve_ids(client, endpoint, price_ids).await;
-
-                let network_rpc = near_rpc_resolver(network);
-
-                let contract_id = contract_id
-                    .clone()
-                    .or_else(|| default_pyth_contract_id(network_rpc))
-                    .expect("Could not determine Pyth contract ID");
-
-                let near_client = near_fetch::Client::new(network_rpc);
-
-                for id in resolved {
-                    let price = get_price_onchain(&near_client, &contract_id, id).await;
-                    writeln!(out, "{id}: {price}")?;
-                }
-
-                Ok(())
-            }
-            Command::Update {
-                price_ids,
-                key_file,
-                network,
-                contract_id,
-                max_fee,
-            } => {
-                let response = get_prices_http(client, endpoint, price_ids).await;
-                let vaa = &response.binary.data[0];
-
-                let key_file = std::fs::read_to_string(key_file)?;
-                let KeyFile {
-                    account_id,
-                    private_key,
-                } = serde_json::from_str::<KeyFile>(&key_file)?;
-                let signer = InMemorySigner::from_secret_key(
-                    account_id.clone(),
-                    private_key.parse().unwrap(),
-                );
-
-                println!("Acting account: {account_id}");
-
-                let network = near_rpc_resolver(network);
-
-                let near = near_fetch::Client::new(network);
-
-                let contract_id = contract_id
-                    .clone()
-                    .or_else(|| default_pyth_contract_id(network))
-                    .expect("Unknown network or contract ID");
-
-                let result = push_update_to_chain(&near, &signer, &contract_id, vaa, max_fee)
-                    .await
-                    .unwrap();
-
-                writeln!(out, "TXID: {}", result.details.transaction.hash)?;
-
-                Ok(())
-            }
-            Command::Find { query } => {
-                let result = find_feeds(client, endpoint, query).await;
-
-                for feed in result {
-                    writeln!(out, "{}", feed.id)?;
-                    writeln!(out, "\t{}", feed.attributes.symbol)?;
-                    writeln!(out, "\t{}", feed.attributes.description)?;
-                    writeln!(out)?;
-                }
-
-                Ok(())
-            }
-            Command::Get { price_ids, json } => {
-                let feeds = get_prices_http(client, endpoint, price_ids).await;
-
-                if *json {
-                    writeln!(out, "{}", serde_json::to_string(&feeds.parsed).unwrap())
-                } else {
-                    for feed in feeds.parsed {
-                        writeln!(out, "Feed ID: {}", feed.id)?;
-
-                        writeln!(out, "{}", feed.price)?;
-                    }
-
-                    Ok(())
-                }
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct KeyFile {
     private_key: String,
@@ -383,13 +288,148 @@ async fn resolve_price_id(
 #[tokio::main]
 async fn main() {
     let args = Cli::parse();
-    let client = reqwest::ClientBuilder::new()
+
+    let http = reqwest::ClientBuilder::new()
         .user_agent(USER_AGENT)
         .build()
         .unwrap();
 
-    args.command
-        .exec(&mut std::io::stdout(), &client, &args.endpoint)
-        .await
-        .unwrap();
+    let network_rpc = near_rpc_resolver(&args.network);
+
+    let near = near_fetch::Client::new(network_rpc);
+
+    let contract_id = args
+        .contract_id
+        .clone()
+        .or_else(|| default_pyth_contract_id(network_rpc))
+        .expect("Could not determine Pyth contract ID");
+
+    match args.command {
+        Command::StreamUpdate {
+            price_ids,
+            key_file,
+        } => {
+            let resolved = resolve_ids(&http, &args.endpoint, price_ids).await;
+
+            let signer = get_signer_from_key_file(&key_file);
+
+            let (send, mut recv) = mpsc::unbounded_channel::<String>();
+
+            let mut url = args.endpoint.join("/v2/updates/price/stream").unwrap();
+            let mut params = url.query_pairs_mut();
+            for id in resolved {
+                params.append_pair("ids[]", &id.to_string());
+            }
+            params.append_pair("encoding", "hex");
+            params.append_pair("parsed", "true");
+            params.append_pair("allow_unordered", "true");
+            params.append_pair("benchmarks_only", "false");
+            drop(params);
+
+            let mut es = reqwest_eventsource::EventSource::get(url);
+
+            tokio::spawn({
+                async move {
+                    loop {
+                        let mut msgs = Vec::with_capacity(recv.len());
+
+                        recv.recv_many(&mut msgs, recv.len()).await;
+
+                        if let Some(newest_vaa) = msgs.last() {
+                            println!("Skipping {}, pushing newest data only", msgs.len() - 1);
+                            let res = push_update_to_chain(
+                                &near,
+                                &signer,
+                                &contract_id,
+                                newest_vaa,
+                                &args.max_fee,
+                            )
+                            .await
+                            .unwrap();
+                            println!("Update TXID: {}", res.details.transaction.hash);
+                        }
+                    }
+                }
+            });
+
+            while let Some(event) = es.next().await {
+                match event {
+                    Ok(reqwest_eventsource::Event::Open) => {}
+                    Ok(reqwest_eventsource::Event::Message(msg)) => {
+                        let Ok(response) = serde_json::from_str::<PriceResponse>(&msg.data) else {
+                            continue;
+                        };
+
+                        println!("Got: {:?}", response.parsed);
+
+                        send.send(response.binary.data[0].clone()).unwrap();
+                    }
+                    Err(e) => {
+                        eprintln!("Error: {e}");
+                        es.close();
+                        break;
+                    }
+                }
+            }
+
+            todo!()
+        }
+        Command::ContractGet { price_ids } => {
+            let resolved = resolve_ids(&http, &args.endpoint, price_ids).await;
+
+            for id in resolved {
+                let price = get_price_onchain(&near, &contract_id, id).await;
+                println!("{id}: {price}");
+            }
+        }
+        Command::Update {
+            price_ids,
+            key_file,
+        } => {
+            let response = get_prices_http(&http, &args.endpoint, price_ids).await;
+            let vaa = &response.binary.data[0];
+
+            let signer = get_signer_from_key_file(&key_file);
+
+            println!("Acting account: {}", signer.account_id);
+
+            let result = push_update_to_chain(&near, &signer, &contract_id, vaa, &args.max_fee)
+                .await
+                .unwrap();
+
+            println!("TXID: {}", result.details.transaction.hash);
+        }
+        Command::Find { query } => {
+            let result = find_feeds(&http, &args.endpoint, &query).await;
+
+            for feed in result {
+                println!("{}", feed.id);
+                println!("\t{}", feed.attributes.symbol);
+                println!("\t{}", feed.attributes.description);
+                println!();
+            }
+        }
+        Command::Get { price_ids, json } => {
+            let feeds = get_prices_http(&http, &args.endpoint, price_ids).await;
+
+            if json {
+                println!("{}", serde_json::to_string(&feeds.parsed).unwrap());
+            } else {
+                for feed in feeds.parsed {
+                    println!("Feed ID: {}", feed.id);
+
+                    println!("{}", feed.price);
+                }
+            }
+        }
+    }
+}
+
+fn get_signer_from_key_file(key_file: &Path) -> InMemorySigner {
+    let key_file = std::fs::read_to_string(key_file).unwrap();
+    let KeyFile {
+        account_id,
+        private_key,
+    } = serde_json::from_str::<KeyFile>(&key_file).unwrap();
+    InMemorySigner::from_secret_key(account_id.clone(), private_key.parse().unwrap())
 }

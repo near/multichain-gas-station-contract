@@ -19,6 +19,8 @@ near-primitives = "0.22.0"
 near-token = "0.2.0"
 near-fetch = "0.4.0"
 near-crypto = "0.22.0"
+reqwest-eventsource = "0.6.0"
+futures-util = "0.3.30"
 
 [lints]
 workspace = true
