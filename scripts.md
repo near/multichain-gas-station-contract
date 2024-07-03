@@ -8,7 +8,10 @@
    near contract deploy canhazgas.testnet use-file ./target/near/gas_station/gas_station.wasm with-init-call new_debug json-args '{"oracle_id":"pyth-oracle.testnet","signer_contract_id":"v2.nft.kagi.testnet"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
    ```
 
-2. Add supported deposit assets
+2. Add supported deposit assets.
+
+   > [!IMPORTANT]
+   > In this contract, all oracle price identifiers _must_ be paired with USD (e.g. NEAR/**USD**, ETH/**USD**, etc.).
 
    **Native NEAR**
 
@@ -16,15 +19,41 @@
    near contract call-function as-transaction canhazgas.testnet add_accepted_local_asset json-args '{"asset_id":"Native","decimals":24,"oracle_asset_id":"3gnSbT7bhoTdGkFVZc1dW1PvjreWzpUNUD5ppXwv1N59"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as hatchet.testnet network-config testnet sign-with-legacy-keychain send
    ```
 
-3. Add foreign chain
+3. Add foreign chains.
+
+   **BSC Testnet**
+
+   **Note**: This script currently uses the ETH/USD price identifier despite the chain ID being that of BSC. This is because the Pyth price feed for BNB/USD on NEAR testnet is currently not working.
 
    ```sh
    near contract call-function as-transaction canhazgas.testnet add_foreign_chain json-args '{"chain_id":"97","oracle_asset_id":"EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw","transfer_gas":"21000","fee_rate":["120","100"],"decimals":18}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
    ```
 
-   **Note**: This script currently uses the ETH/USD price identifier despite the chain ID being that of BSC. This is because the Pyth price feed for BNB/USD on NEAR testnet is currently not working.
+   **ETH Sepolia Testnet**
 
-4. Add paymaster
+   ```sh
+   near contract call-function as-transaction canhazgas.testnet add_foreign_chain json-args '{"chain_id":"11155111","oracle_asset_id":"EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw","transfer_gas":"21000","fee_rate":["120","100"],"decimals":18}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
+   ```
+
+   **Base Testnet**
+
+   ```sh
+   near contract call-function as-transaction canhazgas.testnet add_foreign_chain json-args '{"chain_id":"84532","oracle_asset_id":"EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw","transfer_gas":"21000","fee_rate":["120","100"],"decimals":18}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
+   ```
+
+   **Arbitrum Sepolia Testnet**
+
+   ```sh
+   near contract call-function as-transaction canhazgas.testnet add_foreign_chain json-args '{"chain_id":"421614","oracle_asset_id":"EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw","transfer_gas":"21000","fee_rate":["120","100"],"decimals":18}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
+   ```
+
+   **Optimism Sepolia Testnet**
+
+   ```sh
+   near contract call-function as-transaction canhazgas.testnet add_foreign_chain json-args '{"chain_id":"11155420","oracle_asset_id":"EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw","transfer_gas":"21000","fee_rate":["120","100"],"decimals":18}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
+   ```
+
+4. Add paymaster.
 
    **Add administrator if necessary**
 
@@ -46,9 +75,13 @@
 
 Selected [Pyth price identifiers](https://pyth.network/price-feeds?cluster=pythtest-crosschain):
 
-- NEAR/USD: `3gnSbT7bhoTdGkFVZc1dW1PvjreWzpUNUD5ppXwv1N59`
-- ETH/USD: `EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw`
-- BNB/USD: `GwzBgrXb4PG59zjce24SF2b9JXbLEjJJTBkmytuEZj1b`
+| Feed     | Identifier (base58)                            | Identifier (hex) |
+| -------- | ---------------------------------------------- |-|
+| NEAR/USD | `3gnSbT7bhoTdGkFVZc1dW1PvjreWzpUNUD5ppXwv1N59` | `27e867f0f4f61076456d1a73b14c7edc1cf5cef4f4d6193a33424288f11bd0f4` |
+| ETH/USD  | `EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw` | `ca80ba6dc32e08d06f1aa886011eed1d77c77be9eb761cc10d72b7d0a2fd57a6` |
+| BNB/USD  | `GwzBgrXb4PG59zjce24SF2b9JXbLEjJJTBkmytuEZj1b` | `ecf553770d9b10965f8fb64771e93f5690a182edc32be4a3236e0caaa6e0581a` |
+| ARB/USD  | `5HRrdmghsnU3i2u5StaKaydS7eq3vnKVKwXMzCNKsc4C` | |
+| OP/USD   | `4o4CUwzFwLqCvmA5x1G4VzoZkAhAcbiuiYyjWX1CVbY2` | |
 
 ## Signing sequence
 

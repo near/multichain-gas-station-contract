@@ -13,3 +13,16 @@ pub fn decode_pyth_price_id(s: &str) -> [u8; 32] {
         .expect_or_reject("Failed to decode Pyth price identifier");
     b
 }
+
+#[test]
+fn test() {
+    use crate::pyth::PriceIdentifier;
+
+    println!(
+        "{}",
+        near_sdk::serde_json::to_string(&PriceIdentifier(decode_pyth_price_id(
+            "4CkQJBxhU8EZ2UjhigbtdaPbpTe6mqf811fipYBFbSYN"
+        )))
+        .unwrap()
+    );
+}
