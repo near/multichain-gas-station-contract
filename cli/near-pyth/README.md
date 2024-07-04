@@ -114,3 +114,7 @@ TXID: 2UeXd6exhDgiEhjCLLmHkE2NJ17ZraaXUF49bHMEMnRh
 Skipping 10, pushing newest data only
 [snip]
 ```
+
+## Authors
+
+- Jacob Lindahl <jacob.lindahl@near.org> [@sudo_build](https://twitter.com/sudo_build)
