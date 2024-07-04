@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use futures_util::StreamExt;
 use lib::pyth::PriceIdentifier;
 use near_fetch::{result::ExecutionFinalResult, signer::SignerExt};
@@ -9,7 +11,7 @@ use near_primitives::types::AccountId;
 use near_token::NearToken;
 use reqwest::Url;
 use serde_json::json;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::JoinSet};
 
 use crate::{PriceResponse, PythFeedDescription, PythPrice};
 
@@ -123,7 +125,7 @@ impl App {
             .unwrap()
     }
 
-    pub async fn get_onchain_price(&self, price_id: PriceIdentifier) -> PythPrice {
+    pub async fn get_onchain_price(&self, price_id: PriceIdentifier) -> Option<PythPrice> {
         self.near
             .view(&self.contract_id, "get_price")
             .args_json(json!({
@@ -131,7 +133,7 @@ impl App {
             }))
             .await
             .unwrap()
-            .json::<PythPrice>()
+            .json::<Option<PythPrice>>()
             .unwrap()
     }
 
@@ -167,12 +169,12 @@ impl App {
     }
 
     pub async fn stream_update(
-        &self,
-        signer: &dyn SignerExt,
+        self: Arc<Self>,
+        signer: Arc<dyn SignerExt>,
         price_ids: &[PriceIdentifier],
         max_fee: NearToken,
     ) -> ! {
-        let (send, mut recv) = mpsc::unbounded_channel::<String>();
+        let (send, mut recv) = mpsc::unbounded_channel::<Vec<String>>();
 
         let mut url = self.endpoint.join("/v2/updates/price/stream").unwrap();
         let mut params = url.query_pairs_mut();
@@ -198,9 +200,11 @@ impl App {
                                 continue;
                             };
 
-                            println!("{}: {}", response.parsed[0].id, response.parsed[0].price);
+                            for feed in response.parsed {
+                                println!("{}: {}", feed.id, feed.price);
+                            }
 
-                            send.send(response.binary.data[0].clone()).unwrap();
+                            send.send(response.binary.data).unwrap();
                         }
                         Err(e) => {
                             eprintln!("Error: {e}");
@@ -219,13 +223,22 @@ impl App {
 
             recv.recv_many(&mut msgs, recv.len()).await;
 
-            if let Some(newest_vaa) = msgs.last() {
-                println!("Skipping {}, pushing newest data only", msgs.len() - 1);
-                let res = self
-                    .push_update_to_chain(signer, newest_vaa, &max_fee)
-                    .await
-                    .unwrap();
-                println!("TXID: {}", res.details.transaction.hash);
+            if let Some(newest_data) = msgs.pop() {
+                println!("Skipping {}, pushing newest data only", msgs.len());
+                let mut set = JoinSet::new();
+                for data in newest_data {
+                    let signer = Arc::clone(&signer);
+                    let s = Arc::clone(&self);
+                    set.spawn(async move {
+                        let res = s
+                            .push_update_to_chain(signer.as_ref(), &data, &max_fee)
+                            .await
+                            .unwrap();
+                        println!("TXID: {}", res.details.transaction.hash);
+                    });
+                }
+
+                while set.join_next().await.is_some() {}
             }
         }
     }

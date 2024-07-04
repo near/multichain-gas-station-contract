@@ -9,6 +9,7 @@ use std::{
     fmt::Display,
     path::{Path, PathBuf},
     str::FromStr,
+    sync::Arc,
 };
 
 mod app;
@@ -111,7 +112,7 @@ struct PythFeedDescriptionAttributes {
     generic_symbol: Option<String>,
     quote_currency: String,
     symbol: String,
-    weekly_schedule: String,
+    weekly_schedule: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,7 +170,9 @@ async fn main() {
 
             println!("Acting account: {}", signer.account_id);
 
-            app.stream_update(&signer, &price_ids, args.max_fee).await;
+            Arc::new(app)
+                .stream_update(Arc::new(signer), &price_ids, args.max_fee)
+                .await;
         }
         Command::ContractGet { queries } => {
             let price_ids = app.resolve_price_ids(queries).await;
@@ -177,7 +180,12 @@ async fn main() {
             for id in price_ids {
                 let price = app.get_onchain_price(id).await;
                 println!("Feed ID: {id}");
-                println!("{price}");
+                if let Some(price) = price {
+                    println!("{price}");
+                } else {
+                    println!("No price found");
+                }
+                println!();
             }
         }
         Command::Update { queries, key_file } => {
@@ -216,6 +224,7 @@ async fn main() {
                 for feed in feeds.parsed {
                     println!("Feed ID: {}", feed.id);
                     println!("{}", feed.price);
+                    println!();
                 }
             }
         }
