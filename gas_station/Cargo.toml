@@ -13,8 +13,8 @@ schemars.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-near-workspaces = { version = "0.10", features = ["unstable"] }
-tokio = "1.28"
+near-workspaces.workspace = true
+tokio.workspace = true
 
 [features]
 default = ["debug"]

@@ -9,6 +9,10 @@ near-sdk-contract-tools = { version = "3.0.2" }
 schemars = "0.8.16"
 thiserror = "1"
 
+# dev-dependencies only
+near-workspaces = { version = "0.11", features = ["unstable"] }
+tokio = "1.28"
+
 [workspace.lints.clippy]
 pedantic = "warn"
 missing-panics-doc = "allow"
