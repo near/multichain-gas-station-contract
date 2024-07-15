@@ -150,7 +150,7 @@ impl ChainKeyToken for NftKeyContract {
                 .sign(
                     payload.try_into().unwrap(),
                     &format!("{token_id},{path}"),
-                    0,
+                    key_data.key_version,
                 )
                 .then(
                     Self::ext(env::current_account_id())
