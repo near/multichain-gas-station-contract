@@ -5,11 +5,15 @@ use lib::{
 };
 use near_sdk::{
     assert_one_yocto, collections::UnorderedMap, env, near, require, AccountId, AccountIdRef,
-    BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
+    BorshStorageKey, Gas, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
 };
 use near_sdk_contract_tools::hook::Hook;
 #[allow(clippy::wildcard_imports)]
 use near_sdk_contract_tools::nft::*;
+
+/// OID for secp256k1 curve.
+/// See: <https://oidref.com/1.3.132.0.10>
+static SCHEME_OID: &str = "1.3.132.0.10";
 
 #[derive(Debug, BorshStorageKey)]
 #[near]
@@ -146,7 +150,6 @@ impl ChainKeyToken for NftKeyContract {
 
         PromiseOrValue::Promise(
             ext_signer::ext(self.signer_contract_id.clone())
-                .with_unused_gas_weight(10)
                 .sign(
                     payload.try_into().unwrap(),
                     &format!("{token_id},{path}"),
@@ -154,8 +157,8 @@ impl ChainKeyToken for NftKeyContract {
                 )
                 .then(
                     Self::ext(env::current_account_id())
-                        .with_static_gas(near_sdk::Gas::from_tgas(3))
-                        .with_unused_gas_weight(1)
+                        .with_static_gas(Self::SIGN_CALLBACK_GAS)
+                        .with_unused_gas_weight(0)
                         .sign_callback(),
                 ),
         )
@@ -198,7 +201,7 @@ impl ChainKeyToken for NftKeyContract {
     }
 
     fn ckt_scheme_oid(&self) -> String {
-        "1.3.132.0.10".to_string()
+        SCHEME_OID.to_string()
     }
 }
 
@@ -221,6 +224,8 @@ impl NftKeyContract {
         .unwrap_or_reject();
         derived_public_key.to_string()
     }
+
+    const SIGN_CALLBACK_GAS: Gas = Gas::from_tgas(3);
 
     #[private]
     #[must_use]

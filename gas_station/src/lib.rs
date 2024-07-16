@@ -512,7 +512,7 @@ impl Contract {
             )
             .then(
                 Self::ext(env::current_account_id())
-                    .with_static_gas(Gas::from_tgas(3))
+                    .with_static_gas(Self::SIGN_NEXT_CALLBACK_GAS)
                     .with_unused_gas_weight(0)
                     .sign_next_callback(id.into(), index as u32),
             );
@@ -521,6 +521,8 @@ impl Contract {
 
         ret
     }
+
+    const SIGN_NEXT_CALLBACK_GAS: Gas = Gas::from_tgas(3);
 
     #[private]
     pub fn sign_next_callback(
