@@ -364,7 +364,7 @@ impl Contract {
             })?;
 
         let gas_tokens_to_sponsor_transaction =
-            foreign_chain.calculate_gas_tokens_to_sponsor_transaction(&transaction_request);
+            foreign_chain.calculate_gas_tokens_to_sponsor_transaction(&transaction_request)?;
 
         let local_asset_fee = foreign_chain.price_for_gas_tokens(
             gas_tokens_to_sponsor_transaction,
@@ -481,8 +481,8 @@ impl Contract {
 
         // ensure not expired
         require!(
-            env::block_height()
-                <= self.expire_sequence_after_blocks + transaction.created_at_block_height.0,
+            env::block_height().saturating_sub(transaction.created_at_block_height.0)
+                <= self.expire_sequence_after_blocks,
             "Transaction is expired",
         );
 
@@ -569,7 +569,13 @@ impl Contract {
         // This is important to ensuring that refund logic works correctly.
         if let Some(escrow) = pending_transaction_sequence.escrow.take() {
             let mut collected_fees = self.collected_fees.get(&escrow.asset_id).unwrap_or(U128(0));
-            collected_fees.0 += escrow.amount.0;
+            // This should not fail, but if it does fail, that means the token
+            // in question incorrectly implements the NEP-141 standard, which
+            // dictates that the total supply fits in 128 bits.
+            collected_fees.0 = collected_fees
+                .0
+                .checked_add(escrow.amount.0)
+                .unwrap_or_reject();
             self.collected_fees
                 .insert(&escrow.asset_id, &collected_fees);
         }
@@ -631,7 +637,7 @@ impl Contract {
 
         require!(
             transaction.created_by_account_id == env::predecessor_account_id(),
-            "Unauthorized"
+            "Unauthorized",
         );
 
         for signature_request in &transaction.signature_requests {
