@@ -189,6 +189,7 @@ pub struct Contract {
 
 #[near_bindgen]
 impl Contract {
+    #[private]
     #[init]
     pub fn new(
         signer_contract_id: AccountId,

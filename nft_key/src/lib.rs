@@ -44,6 +44,7 @@ fn generate_token_metadata(id: u32) -> TokenMetadata {
 
 #[near]
 impl NftKeyContract {
+    #[private]
     #[init]
     pub fn new(signer_contract_id: AccountId) -> Self {
         let mut contract = Self {
