@@ -284,9 +284,9 @@ impl Contract {
             let foreign_chain_configuration = self.get_chain(chain_id.as_u64()).unwrap_or_reject();
 
             ext_pyth::ext(self.oracle_id.clone())
-                .get_price(pyth::PriceIdentifier(accepted_local_asset.oracle_asset_id))
+                .get_ema_price(pyth::PriceIdentifier(accepted_local_asset.oracle_asset_id))
                 .and(
-                    ext_pyth::ext(self.oracle_id.clone()).get_price(pyth::PriceIdentifier(
+                    ext_pyth::ext(self.oracle_id.clone()).get_ema_price(pyth::PriceIdentifier(
                         foreign_chain_configuration.oracle_asset_id,
                     )),
                 )
