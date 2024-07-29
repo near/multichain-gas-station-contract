@@ -1,6 +1,6 @@
 use lib::{
     chain_key::{ext_chain_key_token_approval_receiver, ChainKeyToken, ChainKeyTokenApproval},
-    signer::{ext_signer, MpcSignature},
+    signer::{ext_signer, SignRequest, SignResult},
     Rejectable,
 };
 use near_sdk::{
@@ -151,11 +151,11 @@ impl ChainKeyToken for NftKeyContract {
 
         PromiseOrValue::Promise(
             ext_signer::ext(self.signer_contract_id.clone())
-                .sign(
+                .sign(SignRequest::new(
                     payload.try_into().unwrap(),
-                    &format!("{token_id},{path}"),
+                    format!("{token_id},{path}"),
                     key_data.key_version,
-                )
+                ))
                 .then(
                     Self::ext(env::current_account_id())
                         .with_static_gas(Self::SIGN_CALLBACK_GAS)
@@ -188,10 +188,10 @@ impl ChainKeyToken for NftKeyContract {
         {
             PromiseOrValue::Promise(
                 Promise::new(self.signer_contract_id.clone()).function_call(
-                    "public_key_for".to_string(),
+                    "derived_public_key".to_string(),
                     near_sdk::serde_json::to_vec(&near_sdk::serde_json::json!({
-                        "account_id": env::current_account_id(),
                         "path": format!("{id},{path}"),
+                        "prededessor": env::current_account_id(),
                     }))
                     .unwrap_or_reject(),
                     near_sdk::NearToken::from_yoctonear(0),
@@ -232,7 +232,7 @@ impl NftKeyContract {
     #[must_use]
     pub fn sign_callback(
         &self,
-        #[callback_result] result: Result<MpcSignature, PromiseError>,
+        #[callback_result] result: Result<SignResult, PromiseError>,
     ) -> String {
         let mpc_signature = result.unwrap();
         let ethers_signature: ethers_core::types::Signature =
