@@ -282,9 +282,9 @@ async fn fail_price_estimation_minus_one_is_insufficient() {
     let (local_asset_price, foreign_asset_price) = tokio::join!(
         async {
             oracle
-                .view("get_price")
+                .view("get_ema_price")
                 .args_json(json!({
-                    "price_identifier": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
+                    "price_id": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
                 }))
                 .await
                 .unwrap()
@@ -293,9 +293,9 @@ async fn fail_price_estimation_minus_one_is_insufficient() {
         },
         async {
             oracle
-                .view("get_price")
+                .view("get_ema_price")
                 .args_json(json!({
-                    "price_identifier": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
+                    "price_id": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
                 }))
                 .await
                 .unwrap()
@@ -350,9 +350,9 @@ async fn test_price_estimation() {
     let (local_asset_price, foreign_asset_price) = tokio::join!(
         async {
             oracle
-                .view("get_price")
+                .view("get_ema_price")
                 .args_json(json!({
-                    "price_identifier": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
+                    "price_id": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
                 }))
                 .await
                 .unwrap()
@@ -361,9 +361,9 @@ async fn test_price_estimation() {
         },
         async {
             oracle
-                .view("get_price")
+                .view("get_ema_price")
                 .args_json(json!({
-                    "price_identifier": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
+                    "price_id": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
                 }))
                 .await
                 .unwrap()
@@ -654,9 +654,9 @@ async fn test_workflow_happy_path() {
     let (local_asset_price, foreign_asset_price, fees_to_withdraw) = tokio::join!(
         async {
             oracle
-                .view("get_price")
+                .view("get_ema_price")
                 .args_json(json!({
-                    "price_identifier": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
+                    "price_id": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_NEAR_USD)),
                 }))
                 .await
                 .unwrap()
@@ -665,9 +665,9 @@ async fn test_workflow_happy_path() {
         },
         async {
             oracle
-                .view("get_price")
+                .view("get_ema_price")
                 .args_json(json!({
-                    "price_identifier": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
+                    "price_id": pyth::PriceIdentifier(decode_pyth_price_id(PYTH_PRICE_ID_ETH_USD)),
                 }))
                 .await
                 .unwrap()
