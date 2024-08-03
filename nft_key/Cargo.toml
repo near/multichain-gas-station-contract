@@ -22,8 +22,5 @@ default = ["debug"]
 
 debug = []
 
-# changes the KDF in ckt_public_key_for
-real-kdf = []
-
 [lints]
 workspace = true
