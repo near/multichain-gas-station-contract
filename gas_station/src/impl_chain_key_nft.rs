@@ -1,11 +1,10 @@
-use ethers_core::k256::EncodedPoint;
 use lib::{
     chain_key::{ext_chain_key_token, ChainKeyTokenApprovalReceiver},
     Rejectable,
 };
 use near_sdk::{
     collections::UnorderedMap, env, near, near_bindgen, require, AccountId, Promise, PromiseError,
-    PromiseOrValue,
+    PromiseOrValue, PublicKey,
 };
 use near_sdk_contract_tools::{
     nft::{ext_nep171, Nep171Receiver, TokenId},
@@ -75,10 +74,11 @@ impl Contract {
         #[serializer(borsh)] token_id: TokenId,
         #[serializer(borsh)] authorization: ChainKeyAuthorization,
         #[serializer(borsh)] msg: String,
-        #[callback_result] result: Result<String, PromiseError>,
+        #[callback_result] result: Result<PublicKey, PromiseError>,
     ) -> PromiseOrValue<bool> {
-        let public_key =
-            <EncodedPoint as std::str::FromStr>::from_str(&result.unwrap()).unwrap_or_reject();
+        let Ok(public_key) = result else {
+            env::panic_str("Failed to retrieve public key from signer contract");
+        };
 
         let sent_from_contract_administrator =
             <Self as Rbac>::has_role(&account_id, &Role::Administrator);
@@ -88,9 +88,8 @@ impl Contract {
                 .map_or(false, |m| m.is_paymaster)
         };
 
-        let public_key_bytes = public_key.to_bytes().into_vec();
         let key_data = ChainKeyData {
-            public_key_bytes,
+            public_key_bytes: public_key.into_bytes(),
             authorization,
         };
 

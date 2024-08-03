@@ -612,7 +612,7 @@ async fn test_workflow_happy_path() {
 
     println!("Second signed transaction: {signed_tx_2:?}");
 
-    let _alice_foreign_address = gas_station
+    let alice_foreign_address = gas_station
         .view("get_foreign_address_for")
         .args_json(json!({
             "account_id": alice.id(),
@@ -627,7 +627,7 @@ async fn test_workflow_happy_path() {
     let signed_transaction_rlp = Rlp::new(&signed_transaction_bytes);
     let (_tx, _s) = TypedTransaction::decode_signed(&signed_transaction_rlp).unwrap();
     // IGNORE: due to not having a real MPC to mock and not actually deriving keys
-    // assert_eq!(alice_foreign_address, tx.from().unwrap().into());
+    assert_eq!(alice_foreign_address, _tx.from().unwrap().into());
 
     let signed_transaction_sequences = gas_station
         .view("list_signed_transaction_sequences_after")
