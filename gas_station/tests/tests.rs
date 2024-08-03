@@ -178,7 +178,7 @@ async fn setup() -> Setup {
     println!("Paymaster key: {paymaster_key}");
 
     println!("Approving paymaster NFT key to gas station...");
-    let r = alice
+    alice
         .call(nft_key.id(), "ckt_approve_call")
         .args_json(json!({
             "account_id": gas_station.id(),
@@ -191,11 +191,8 @@ async fn setup() -> Setup {
         .max_gas()
         .transact()
         .await
+        .unwrap()
         .unwrap();
-
-    for f in r.failures() {
-        println!("{f:?}");
-    }
 
     println!("Adding paymaster...");
     alice
