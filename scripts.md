@@ -2,22 +2,27 @@
 
 ## Initialization sequence
 
-1. Deploy
+NOTE: ensure `network-config testnet` is set to appropriate value for all calls (either mainnet or testnet)
 
+1. Deploy 
+- ensure `canhazgas.testnet` field is updated to the appropriate values (name of your gas station contract)
+  
    ```sh
    near contract deploy canhazgas.testnet use-file ./target/near/gas_station/gas_station.wasm with-init-call new_debug json-args '{"oracle_id":"pyth-oracle.testnet","signer_contract_id":"v2.nft.kagi.testnet"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
    ```
 
-2. Add supported deposit assets
-
+2. Add supported deposit assets 
+- ensure the `hatchet.testnet`, `oracle_asset_id`, and `canhazgas.testnet` fields are updated to the appropriate values
+  
    **Native NEAR**
 
    ```sh
    near contract call-function as-transaction canhazgas.testnet add_accepted_local_asset json-args '{"asset_id":"Native","decimals":24,"oracle_asset_id":"3gnSbT7bhoTdGkFVZc1dW1PvjreWzpUNUD5ppXwv1N59"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as hatchet.testnet network-config testnet sign-with-legacy-keychain send
    ```
 
-3. Add foreign chain
-
+3. Add foreign chain  
+- ensure the `chain_id`, `oracle_asset_id`, and `canhazgas.testnet` fields are updated to the appropriate values
+  
    ```sh
    near contract call-function as-transaction canhazgas.testnet add_foreign_chain json-args '{"chain_id":"97","oracle_asset_id":"EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw","transfer_gas":"21000","fee_rate":["120","100"],"decimals":18}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
    ```
@@ -27,18 +32,23 @@
 4. Add paymaster
 
    **Add administrator if necessary**
-
+   - ensure the `hatchet.testnet`, and `canhazgas.testnet` fields are updated to the appropriate values
+  
    ```sh
    near contract call-function as-transaction canhazgas.testnet add_administrator json-args '{"account_id":"hatchet.testnet"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
    ```
 
-   **Transfer chain key NFT**
+   **Transfer chain key NFT - if NFT already minted**
+     - NOTE: to mint NFT see https://github.com/near/multichain-gas-station-contract/tree/pyth-client/nft_key#creating-new-key-tokens
+     - ensure the `token_id`, `account_id`, and `hatchet.testnet` fields are updated to the appropriate values
 
    ```sh
    near contract call-function as-transaction v2.nft.kagi.testnet ckt_approve_call json-args '{"token_id":"1","account_id":"canhazgas.testnet","msg":"{\"is_paymaster\":true}"}' prepaid-gas '100.0 Tgas' attached-deposit '1 yoctoNEAR' sign-as hatchet.testnet network-config testnet sign-with-legacy-keychain send
    ```
 
    **Mark key for use as paymaster**
+   - NOTE: call this once per `chain_id` you wish to add.
+   - ensure the `chain_id`, `token_id`, and `canhazgas.testnet` fields are updated to the appropriate values
 
    ```sh
    near contract call-function as-transaction canhazgas.testnet add_paymaster json-args '{"chain_id":"97","balance":"100000000000000000000","nonce":0,"token_id":"1"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
