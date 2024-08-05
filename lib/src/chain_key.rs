@@ -1,4 +1,4 @@
-use near_sdk::{ext_contract, AccountId, PromiseOrValue};
+use near_sdk::{ext_contract, AccountId, PromiseOrValue, PublicKey};
 
 #[ext_contract(ext_chain_key_token)]
 pub trait ChainKeyToken {
@@ -14,7 +14,7 @@ pub trait ChainKeyToken {
         &mut self,
         token_id: String,
         path: Option<String>,
-    ) -> PromiseOrValue<String>;
+    ) -> PromiseOrValue<PublicKey>;
 }
 
 #[ext_contract(ext_chain_key_token_approval)]

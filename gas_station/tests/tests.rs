@@ -17,7 +17,7 @@ use lib::{
     kdf::get_mpc_address,
     oracle::{decode_pyth_price_id, PYTH_PRICE_ID_ETH_USD, PYTH_PRICE_ID_NEAR_USD},
     pyth,
-    signer::MpcSignature,
+    signer::SignResult,
 };
 use near_sdk::{json_types::U128, serde::Deserialize, serde_json::json};
 use near_workspaces::{
@@ -609,7 +609,7 @@ async fn test_workflow_happy_path() {
 
     println!("Second signed transaction: {signed_tx_2:?}");
 
-    let _alice_foreign_address = gas_station
+    let alice_foreign_address = gas_station
         .view("get_foreign_address_for")
         .args_json(json!({
             "account_id": alice.id(),
@@ -624,7 +624,7 @@ async fn test_workflow_happy_path() {
     let signed_transaction_rlp = Rlp::new(&signed_transaction_bytes);
     let (_tx, _s) = TypedTransaction::decode_signed(&signed_transaction_rlp).unwrap();
     // IGNORE: due to not having a real MPC to mock and not actually deriving keys
-    // assert_eq!(alice_foreign_address, tx.from().unwrap().into());
+    assert_eq!(alice_foreign_address, _tx.from().unwrap().into());
 
     let signed_transaction_sequences = gas_station
         .view("list_signed_transaction_sequences_after")
@@ -874,10 +874,10 @@ fn test_derive_new_mpc() {
     let tx: TypedTransaction = eth_transaction.into();
     let sighash = tx.sighash().to_fixed_bytes();
 
-    let mpc_signature = MpcSignature(
-        "03DAE1E75B650ABC6AD22C899FC4245A9F58E323320B7380872C1813A7DCEB0F95".to_string(),
-        "3FD2BC8430EC146E6D1B0EC64FE80EEDC0C483B95C8247FDFC5ADFC459BB3096".to_string(),
-    );
+    let mpc_signature = SignResult {
+        big_r_hex: "03DAE1E75B650ABC6AD22C899FC4245A9F58E323320B7380872C1813A7DCEB0F95".to_string(),
+        s_hex: "3FD2BC8430EC146E6D1B0EC64FE80EEDC0C483B95C8247FDFC5ADFC459BB3096".to_string(),
+    };
 
     let sig: ethers_core::types::Signature = mpc_signature.try_into().unwrap();
     let recovered_address = sig.recover(sighash).unwrap();
