@@ -246,9 +246,19 @@ impl Contract {
         });
     }
 
+    #[cfg(not(feature = "debug"))]
+    fn require_privileged(&self) {
+        let predecessor = env::predecessor_account_id();
+        require!(
+            <Self as Rbac>::has_role(&predecessor, &Role::MarketMaker)
+                || <Self as Rbac>::has_role(&predecessor, &Role::Administrator),
+            "Can only be called by administrator or market maker",
+        );
+    }
+
     pub fn set_paymaster_balance(&mut self, chain_id: U64, token_id: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
-        <Self as Rbac>::require_role(&Role::MarketMaker);
+        self.require_privileged();
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
@@ -259,7 +269,7 @@ impl Contract {
 
     pub fn increase_paymaster_balance(&mut self, chain_id: U64, token_id: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
-        <Self as Rbac>::require_role(&Role::MarketMaker);
+        self.require_privileged();
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
@@ -273,7 +283,7 @@ impl Contract {
 
     pub fn set_paymaster_nonce(&mut self, chain_id: U64, token_id: String, nonce: u32) {
         #[cfg(not(feature = "debug"))]
-        <Self as Rbac>::require_role(&Role::MarketMaker);
+        self.require_privileged();
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
