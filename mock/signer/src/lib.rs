@@ -61,19 +61,3 @@ impl SignerInterface for MockSignerContract {
         KEY_VERSION
     }
 }
-
-#[test]
-fn test() {
-    let predecessor: AccountId = "account.near".parse().unwrap();
-    let path = "".to_string();
-    let signing_key = construct_spoof_key(predecessor.as_bytes(), path.as_bytes());
-    let verifying_key = signing_key.verifying_key();
-    let encoded = verifying_key.to_encoded_point(false);
-
-    let r = PublicKey::from_parts(
-        near_sdk::CurveType::SECP256K1,
-        encoded.to_bytes()[1..].to_vec(),
-    );
-
-    println!("{r:?}");
-}
