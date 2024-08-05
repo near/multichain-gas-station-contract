@@ -622,9 +622,8 @@ async fn test_workflow_happy_path() {
 
     let signed_transaction_bytes = hex::decode(&signed_tx_2).unwrap();
     let signed_transaction_rlp = Rlp::new(&signed_transaction_bytes);
-    let (_tx, _s) = TypedTransaction::decode_signed(&signed_transaction_rlp).unwrap();
-    // IGNORE: due to not having a real MPC to mock and not actually deriving keys
-    assert_eq!(alice_foreign_address, _tx.from().unwrap().into());
+    let (signed_tx, _s) = TypedTransaction::decode_signed(&signed_transaction_rlp).unwrap();
+    assert_eq!(alice_foreign_address, signed_tx.from().unwrap().into());
 
     let signed_transaction_sequences = gas_station
         .view("list_signed_transaction_sequences_after")
