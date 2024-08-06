@@ -1,5 +1,10 @@
 # Scripts
 
+## Prerequisites
+**Build**
+`cargo build --package gas-station --target wasm32-unknown-unknown --release --no-default-features`
+
+
 ## Initialization sequence
 
 NOTE: ensure `network-config testnet` is set to appropriate value for all calls (either mainnet or testnet)
