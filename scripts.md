@@ -1,8 +1,9 @@
 # Scripts
 
 ## Prerequisites
-**Build**
-`cargo build --package gas-station --target wasm32-unknown-unknown --release --no-default-features`
+**Install**: [near-cli-rs](https://github.com/near/near-cli-rs?tab=readme-ov-file#install)
+
+**Build**: `cargo build --package gas-station --target wasm32-unknown-unknown --release --no-default-features`
 
 
 ## Initialization sequence
