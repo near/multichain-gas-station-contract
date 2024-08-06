@@ -39,7 +39,7 @@ NOTE: ensure `network-config testnet` is set to appropriate value for all calls 
    ```
 
    **Transfer chain key NFT - if NFT already minted**
-     - NOTE: to mint NFT see https://github.com/near/multichain-gas-station-contract/tree/pyth-client/nft_key#creating-new-key-tokens
+     - NOTE: to mint NFT see [./nft_key#creating-new-key-tokens](https://github.com/near/multichain-gas-station-contract/tree/pyth-client/nft_key#creating-new-key-tokens)
      - ensure the `token_id`, `account_id`, and `hatchet.testnet` fields are updated to the appropriate values
 
    ```sh
@@ -48,6 +48,7 @@ NOTE: ensure `network-config testnet` is set to appropriate value for all calls 
 
    **Mark key for use as paymaster**
    - NOTE: call this once per `chain_id` you wish to add.
+   - change the `balance` to the balance of the account on a chain at the time it is added as a paymaster for that chain. The balance must be specified in units of the smallest indivisible unit of gas token (i.e. wei on Ethereum mainnet). To find the account associated with the NFT from the previous step, call [nft_key.near->ckt_public_key_for(token_id)](https://github.com/near/multichain-gas-station-contract/blob/0ad3dd68d1f53129b482eaae865bca1a2daedbb8/nft_key/src/lib.rs#L168) and then convert it into an address using something like [ethers_core::utils::raw_public_key_to_address](https://docs.rs/ethers-core/latest/ethers_core/utils/fn.raw_public_key_to_address.html). For example: https://github.com/near/multichain-gas-station-contract/blob/0ad3dd68d1f53129b482eaae865bca1a2daedbb8/lib/src/foreign_address.rs#L20-L22
    - ensure the `chain_id`, `token_id`, and `canhazgas.testnet` fields are updated to the appropriate values
 
    ```sh
