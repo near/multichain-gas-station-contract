@@ -11,7 +11,7 @@
 NOTE: ensure `network-config testnet` is set to appropriate value for all calls (either mainnet or testnet)
 
 1. Deploy 
-- ensure `canhazgas.testnet`, and `"signer_contract_id"` fields are updated to the appropriate values (name of your gas station contract and chain signatures contract)
+- ensure `canhazgas.testnet`, `"signer_contract_id"`, and `"oracle_id"` (from [pyth NEAR docs](https://docs.pyth.network/price-feeds/contract-addresses/near)) fields are updated to the appropriate values (name of your gas station contract and chain signatures contract)
   
    ```sh
    near contract deploy canhazgas.testnet use-file ./target/near/gas_station/gas_station.wasm with-init-call new_debug json-args '{"oracle_id":"pyth-oracle.testnet","signer_contract_id":"v2.nft.kagi.testnet"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-legacy-keychain send
