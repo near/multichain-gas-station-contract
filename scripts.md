@@ -28,7 +28,9 @@ NOTE: ensure `network-config testnet` is set to appropriate value for all calls 
    ```
 
 3. Add foreign chain  
-- ensure the `chain_id`, `oracle_asset_id`, and `canhazgas.testnet` fields are updated to the appropriate values
+- ensure the `chain_id`, `oracle_asset_id`, `transfer_gas`, `fee_rate`, `decimals` and `canhazgas.testnet` fields are updated to the appropriate values
+- `chain_id` should match key chain_id from [multichain-relayer-server/config.toml](https://github.com/near/multichain-relayer-server/blob/main/config.toml), which is based on chain_ids from https://chainlist.org/
+- `oracle_asset_id` can be found in [pyth mainnet](https://pyth.network/developers/price-feed-ids#near-mainnet) or [pyth testnet](https://pyth.network/developers/price-feed-ids#near-testnet)
   
    ```sh
    near contract call-function as-transaction canhazgas.testnet add_foreign_chain json-args '{"chain_id":"97","oracle_asset_id":"EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw","transfer_gas":"21000","fee_rate":["120","100"],"decimals":18}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' sign-as canhazgas.testnet network-config testnet sign-with-legacy-keychain send
