@@ -246,9 +246,19 @@ impl Contract {
         });
     }
 
+    #[cfg(not(feature = "debug"))]
+    fn require_privileged(&self) {
+        let predecessor = env::predecessor_account_id();
+        require!(
+            <Self as Rbac>::has_role(&predecessor, &Role::MarketMaker)
+                || <Self as Rbac>::has_role(&predecessor, &Role::Administrator),
+            "Can only be called by administrator or market maker",
+        );
+    }
+
     pub fn set_paymaster_balance(&mut self, chain_id: U64, token_id: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
-        <Self as Rbac>::require_role(&Role::MarketMaker);
+        self.require_privileged();
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
@@ -259,19 +269,21 @@ impl Contract {
 
     pub fn increase_paymaster_balance(&mut self, chain_id: U64, token_id: String, balance: U128) {
         #[cfg(not(feature = "debug"))]
-        <Self as Rbac>::require_role(&Role::MarketMaker);
+        self.require_privileged();
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
-            paymaster.minimum_available_balance =
-                (U256(paymaster.minimum_available_balance) + U256::from(balance.0)).0;
+            paymaster.minimum_available_balance = U256(paymaster.minimum_available_balance)
+                .checked_add(U256::from(balance.0))
+                .unwrap_or_reject()
+                .0;
             chain_config.paymasters.insert(&token_id, &paymaster);
         });
     }
 
     pub fn set_paymaster_nonce(&mut self, chain_id: U64, token_id: String, nonce: u32) {
         #[cfg(not(feature = "debug"))]
-        <Self as Rbac>::require_role(&Role::MarketMaker);
+        self.require_privileged();
 
         self.with_mut_chain(chain_id.0, |chain_config| {
             let mut paymaster = chain_config.paymasters.get(&token_id).unwrap_or_reject();
@@ -412,8 +424,9 @@ impl Contract {
 
         let foreign_chain_configuration = self.get_chain(transaction.chain_id).unwrap_or_reject();
 
-        let gas_tokens_to_sponsor_transaction =
-            foreign_chain_configuration.calculate_gas_tokens_to_sponsor_transaction(&transaction);
+        let gas_tokens_to_sponsor_transaction = foreign_chain_configuration
+            .calculate_gas_tokens_to_sponsor_transaction(&transaction)
+            .unwrap_or_reject();
 
         let purchase_price_for_gas_tokens = foreign_chain_configuration
             .price_for_gas_tokens(

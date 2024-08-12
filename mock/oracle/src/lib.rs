@@ -32,4 +32,8 @@ impl Contract {
             None
         }
     }
+
+    pub fn get_ema_price(&self, price_id: pyth::PriceIdentifier) -> Option<pyth::Price> {
+        self.get_price(price_id)
+    }
 }

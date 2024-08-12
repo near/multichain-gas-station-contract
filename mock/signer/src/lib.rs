@@ -1,6 +1,7 @@
 use lib::{
     kdf::sha256,
-    signer::{MpcSignature, SignerInterface},
+    signer::{SignRequest, SignResult, SignerInterface},
+    Rejectable,
 };
 use near_sdk::{env, near, require, AccountId, PromiseOrValue, PublicKey};
 
@@ -13,36 +14,28 @@ pub fn construct_spoof_key(
     ethers_core::k256::ecdsa::SigningKey::from_bytes(predecessor_hash.as_slice().into()).unwrap()
 }
 
+const KEY_VERSION: u32 = 0;
+
 #[derive(Default, Debug)]
 #[near(contract_state)]
 pub struct MockSignerContract {}
 
 #[near]
-impl MockSignerContract {
-    #[must_use]
-    pub fn public_key_for(&self, account_id: AccountId, path: String) -> String {
-        let signing_key = construct_spoof_key(account_id.as_bytes(), path.as_bytes());
-        let verifying_key = signing_key.verifying_key();
-        let encoded = verifying_key.to_encoded_point(false);
-        encoded.to_string()
-    }
-}
-
-#[near]
 impl SignerInterface for MockSignerContract {
     #[payable]
-    fn sign(
-        &mut self,
-        payload: [u8; 32],
-        path: &String,
-        key_version: u32,
-    ) -> PromiseOrValue<MpcSignature> {
-        require!(key_version == 0, "Key version not supported");
+    fn sign(&mut self, request: SignRequest) -> PromiseOrValue<SignResult> {
+        require!(
+            request.key_version == KEY_VERSION,
+            "Key version not supported",
+        );
+
         let predecessor = env::predecessor_account_id();
         // This is unused, but needs to be in the sign signature.
-        let signing_key = construct_spoof_key(predecessor.as_bytes(), path.as_bytes());
-        let (sig, recid) = signing_key.sign_prehash_recoverable(&payload).unwrap();
-        PromiseOrValue::Value(MpcSignature::from_ecdsa_signature(sig, recid).unwrap())
+        let signing_key = construct_spoof_key(predecessor.as_bytes(), request.path.as_bytes());
+        let (sig, recid) = signing_key
+            .sign_prehash_recoverable(&request.payload)
+            .unwrap();
+        PromiseOrValue::Value(SignResult::from_ecdsa_signature(sig, recid).unwrap())
     }
 
     fn public_key(&self) -> PublicKey {
@@ -51,7 +44,20 @@ impl SignerInterface for MockSignerContract {
             .unwrap()
     }
 
+    fn derived_public_key(&self, path: String, predecessor: Option<AccountId>) -> PublicKey {
+        let predecessor = predecessor.unwrap_or_else(env::predecessor_account_id);
+        let signing_key = construct_spoof_key(predecessor.as_bytes(), path.as_bytes());
+        let verifying_key = signing_key.verifying_key();
+        let encoded = verifying_key.to_encoded_point(false);
+
+        PublicKey::from_parts(
+            near_sdk::CurveType::SECP256K1,
+            encoded.to_bytes()[1..].to_vec(),
+        )
+        .unwrap_or_reject()
+    }
+
     fn latest_key_version(&self) -> u32 {
-        0
+        KEY_VERSION
     }
 }

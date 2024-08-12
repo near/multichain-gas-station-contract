@@ -1,15 +1,19 @@
 use lib::{
     chain_key::{ext_chain_key_token_approval_receiver, ChainKeyToken, ChainKeyTokenApproval},
-    signer::{ext_signer, MpcSignature},
+    signer::{ext_signer, SignRequest, SignResult},
     Rejectable,
 };
 use near_sdk::{
     assert_one_yocto, collections::UnorderedMap, env, near, require, AccountId, AccountIdRef,
-    BorshStorageKey, PanicOnDefault, Promise, PromiseError, PromiseOrValue,
+    BorshStorageKey, Gas, PanicOnDefault, Promise, PromiseError, PromiseOrValue, PublicKey,
 };
 use near_sdk_contract_tools::hook::Hook;
 #[allow(clippy::wildcard_imports)]
 use near_sdk_contract_tools::nft::*;
+
+/// OID for secp256k1 curve.
+/// See: <https://oidref.com/1.3.132.0.10>
+static SCHEME_OID: &str = "1.3.132.0.10";
 
 #[derive(Debug, BorshStorageKey)]
 #[near]
@@ -40,6 +44,7 @@ fn generate_token_metadata(id: u32) -> TokenMetadata {
 
 #[near]
 impl NftKeyContract {
+    #[private]
     #[init]
     pub fn new(signer_contract_id: AccountId) -> Self {
         let mut contract = Self {
@@ -64,7 +69,7 @@ impl NftKeyContract {
 
     fn generate_id(&mut self) -> u32 {
         let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = self.next_id.checked_add(1).unwrap_or_reject();
         id
     }
 
@@ -146,16 +151,15 @@ impl ChainKeyToken for NftKeyContract {
 
         PromiseOrValue::Promise(
             ext_signer::ext(self.signer_contract_id.clone())
-                .with_unused_gas_weight(10)
-                .sign(
+                .sign(SignRequest::new(
                     payload.try_into().unwrap(),
-                    &format!("{token_id},{path}"),
-                    0,
-                )
+                    make_path_string(&token_id, &path),
+                    key_data.key_version,
+                ))
                 .then(
                     Self::ext(env::current_account_id())
-                        .with_static_gas(near_sdk::Gas::from_tgas(3))
-                        .with_unused_gas_weight(1)
+                        .with_static_gas(Self::SIGN_CALLBACK_GAS)
+                        .with_unused_gas_weight(0)
                         .sign_callback(),
                 ),
         )
@@ -165,68 +169,33 @@ impl ChainKeyToken for NftKeyContract {
         &mut self,
         token_id: TokenId,
         path: Option<String>,
-    ) -> PromiseOrValue<String> {
-        let id: u32 = token_id.parse().expect_or_reject("Invalid token ID");
+    ) -> PromiseOrValue<PublicKey> {
         let path = path.unwrap_or_default();
 
-        #[cfg(feature = "real-kdf")]
-        {
-            PromiseOrValue::Promise(
-                ext_signer::ext(self.signer_contract_id.clone())
-                    .public_key()
-                    .then(
-                        Self::ext(env::current_account_id()).ckt_public_key_for_callback(id, path),
-                    ),
-            )
-        }
-
-        #[cfg(not(feature = "real-kdf"))]
-        {
-            PromiseOrValue::Promise(
-                Promise::new(self.signer_contract_id.clone()).function_call(
-                    "public_key_for".to_string(),
-                    near_sdk::serde_json::to_vec(&near_sdk::serde_json::json!({
-                        "account_id": env::current_account_id(),
-                        "path": format!("{id},{path}"),
-                    }))
-                    .unwrap_or_reject(),
-                    near_sdk::NearToken::from_yoctonear(0),
-                    env::prepaid_gas().saturating_div(10),
-                ),
-            )
-        }
+        PromiseOrValue::Promise(
+            ext_signer::ext(self.signer_contract_id.clone())
+                .derived_public_key(make_path_string(&token_id, &path), None),
+        )
     }
 
     fn ckt_scheme_oid(&self) -> String {
-        "1.3.132.0.10".to_string()
+        SCHEME_OID.to_string()
     }
+}
+
+fn make_path_string(token_id: &str, path: &str) -> String {
+    format!("{token_id},{path}")
 }
 
 #[near]
 impl NftKeyContract {
-    #[cfg(feature = "real-kdf")]
-    #[private]
-    pub fn ckt_public_key_for_callback(
-        &self,
-        #[serializer(borsh)] token_id: u32,
-        #[serializer(borsh)] path: String,
-        #[callback_result] result: Result<near_sdk::PublicKey, PromiseError>,
-    ) -> String {
-        let mpc_public_key = result.unwrap();
-        let derived_public_key = lib::kdf::derive_public_key_for(
-            mpc_public_key,
-            &env::current_account_id(),
-            &format!("{token_id},{path}"),
-        )
-        .unwrap_or_reject();
-        derived_public_key.to_string()
-    }
+    const SIGN_CALLBACK_GAS: Gas = Gas::from_tgas(3);
 
     #[private]
     #[must_use]
     pub fn sign_callback(
         &self,
-        #[callback_result] result: Result<MpcSignature, PromiseError>,
+        #[callback_result] result: Result<SignResult, PromiseError>,
     ) -> String {
         let mpc_signature = result.unwrap();
         let ethers_signature: ethers_core::types::Signature =

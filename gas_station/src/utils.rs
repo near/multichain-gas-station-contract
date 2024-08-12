@@ -18,10 +18,7 @@ pub fn decode_transaction_request(rlp_hex: &str) -> Eip1559TransactionRequest {
 }
 
 pub fn sighash_for_mpc_signing(signature_request: ValidTransactionRequest) -> [u8; 32] {
-    let mut sighash =
-        <TypedTransaction as From<ValidTransactionRequest>>::from(signature_request.clone())
-            .sighash()
-            .to_fixed_bytes();
-    sighash.reverse();
-    sighash
+    <TypedTransaction as From<ValidTransactionRequest>>::from(signature_request.clone())
+        .sighash()
+        .to_fixed_bytes()
 }

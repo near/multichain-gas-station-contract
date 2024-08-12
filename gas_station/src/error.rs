@@ -29,6 +29,10 @@ pub struct PaymasterInsufficientFundsError {
 }
 
 #[derive(Debug, Error, Clone)]
+#[error("Nonce overflow")]
+pub struct NonceOverflowError;
+
+#[derive(Debug, Error, Clone)]
 #[error("No paymaster configurations exist for chain ID {chain_id}")]
 pub struct NoPaymasterConfigurationForChainError {
     pub chain_id: u64,
@@ -54,6 +58,10 @@ pub struct ConfidenceIntervalTooLargeError;
 pub struct ExponentTooLargeError;
 
 #[derive(Debug, Error, Clone)]
+#[error("Expression overflow")]
+pub struct ExpressionOverflowError;
+
+#[derive(Debug, Error, Clone)]
 pub enum PriceDataError {
     #[error(transparent)]
     NegativePrice(#[from] NegativePriceError),
@@ -61,6 +69,8 @@ pub enum PriceDataError {
     ConfidenceIntervalTooLarge(#[from] ConfidenceIntervalTooLargeError),
     #[error(transparent)]
     ExponentTooLarge(#[from] ExponentTooLargeError),
+    #[error(transparent)]
+    ExpressionOverflow(#[from] ExpressionOverflowError),
 }
 
 #[derive(Debug, Error, Clone)]
@@ -69,6 +79,8 @@ pub enum RequestNonceError {
     NoPaymasterConfigurationForChain(#[from] NoPaymasterConfigurationForChainError),
     #[error(transparent)]
     PaymasterInsufficientFunds(#[from] PaymasterInsufficientFundsError),
+    #[error(transparent)]
+    NonceOverflow(#[from] NonceOverflowError),
 }
 
 #[derive(Debug, Error, Clone)]
@@ -96,4 +108,6 @@ pub enum TryCreateTransactionCallbackError {
     InsufficientDepositForFee(#[from] InsufficientDepositForFeeError),
     #[error(transparent)]
     RequestNonce(#[from] RequestNonceError),
+    #[error(transparent)]
+    ExpressionOverflow(#[from] ExpressionOverflowError),
 }

@@ -11,6 +11,7 @@ use crate::{
         RequestNonceError,
     },
     valid_transaction_request::ValidTransactionRequest,
+    ExpressionOverflowError, NonceOverflowError,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,7 +108,10 @@ impl ForeignChainConfiguration {
 
         let r = f(self, &paymaster_config);
 
-        paymaster_config.nonce += 1;
+        paymaster_config.nonce = paymaster_config
+            .nonce
+            .checked_add(1)
+            .ok_or(NonceOverflowError)?;
         paymaster_config.minimum_available_balance = new_minimum_balance.0;
         self.paymasters.insert(&paymaster_key, &paymaster_config);
         self.next_paymaster = paymaster_key_after;
@@ -123,11 +127,21 @@ impl ForeignChainConfiguration {
             .map(|c| (c, paymaster_key, paymaster_key_after))
     }
 
+    /// Calculate the gas tokens that this chain configuration charges to
+    /// sponsor this transaction.
+    ///
+    /// # Errors
+    ///
+    /// - If the calculation overflows U256.
     pub fn calculate_gas_tokens_to_sponsor_transaction(
         &self,
         transaction: &ValidTransactionRequest,
-    ) -> U256 {
-        (transaction.gas() + U256(self.transfer_gas)) * transaction.max_fee_per_gas()
+    ) -> Result<U256, ExpressionOverflowError> {
+        transaction
+            .gas()
+            .checked_add(U256(self.transfer_gas))
+            .and_then(|x| x.checked_mul(transaction.max_fee_per_gas()))
+            .ok_or(ExpressionOverflowError)
     }
 
     /// Calculate the price that this chain configuration charges to convert
@@ -193,10 +207,22 @@ impl ForeignChainConfiguration {
         }
 
         // Apply conversion rate to quantity in two steps: multiply, then divide.
-        let a = quantity_to_convert * U256::from(conversion_rate.0) * U256::from(self.fee_rate.0);
-        let (b, rem) = a.div_mod(U256::from(conversion_rate.1) * U256::from(self.fee_rate.1));
+        let numerator = quantity_to_convert
+            .checked_mul(U256::from(conversion_rate.0))
+            .and_then(|x| x.checked_mul(U256::from(self.fee_rate.0)))
+            .ok_or(ExpressionOverflowError)?;
+        let denominator = U256::from(conversion_rate.1)
+            .checked_mul(U256::from(self.fee_rate.1))
+            .ok_or(ExpressionOverflowError)?;
+        let (b, rem) = numerator.div_mod(denominator);
 
         // Round up. Again, pessimistic pricing.
-        Ok(if rem.is_zero() { b } else { b + 1 }.as_u128())
+        Ok(if rem.is_zero() {
+            b
+        } else {
+            // It should be impossible for this to overflow, given the above calculations, but better safe than sorry.
+            b.checked_add(U256::one()).ok_or(ExpressionOverflowError)?
+        }
+        .as_u128())
     }
 }
