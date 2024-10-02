@@ -21,6 +21,8 @@
 /// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 /// See the License for the specific language governing permissions and
 /// limitations under the License.
+use std::fmt::{Debug, Display};
+
 use ethers_core::utils::hex;
 use near_sdk::{
     ext_contract,
@@ -28,9 +30,24 @@ use near_sdk::{
     near,
 };
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[near]
 #[repr(transparent)]
 pub struct PriceIdentifier(pub [u8; 32]);
+
+impl Display for PriceIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(self.0))
+    }
+}
+
+impl Debug for PriceIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("PriceIdentifier")
+            .field(&hex::encode(self.0))
+            .finish()
+    }
+}
 
 impl<'de> near_sdk::serde::Deserialize<'de> for PriceIdentifier {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
