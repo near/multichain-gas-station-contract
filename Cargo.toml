@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["gas_station", "lib", "mock/*", "nft_key"]
+members = ["cli/*", "gas_station", "lib", "mock/*", "nft_key"]
 
 [workspace.dependencies]
 ethers-core = "2.0.13"
